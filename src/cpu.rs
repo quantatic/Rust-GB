@@ -1,4 +1,5 @@
-#[derive(Debug)]
+use std::fmt::Debug;
+
 pub struct Cpu {
     pub af: u16,
     pub bc: u16,
@@ -8,6 +9,20 @@ pub struct Cpu {
     pub pc: u16,
     pub interrupt_master_enable: bool,
     pub memory: [u8; 0x10000],
+}
+
+impl Debug for Cpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cpu")
+            .field("af", &self.af)
+            .field("bc", &self.bc)
+            .field("de", &self.de)
+            .field("hl", &self.hl)
+            .field("sp", &self.sp)
+            .field("pc", &self.pc)
+            .field("interrupt_master_enable", &self.interrupt_master_enable)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -22,9 +37,11 @@ pub enum InstructionType {
         source: AddressingModeByte,
         destination: AddressingModeByte,
     },
-    AddWord {
+    AddHl {
         source: AddressingModeWord,
-        destination: AddressingModeWord,
+    },
+    AddSp {
+        value: i8,
     },
     Adc {
         source: AddressingModeByte,
@@ -52,6 +69,7 @@ pub enum InstructionType {
         target: AddressingModeWord,
     },
     Di,
+    Ei,
     Halt,
     IncByte {
         target: AddressingModeByte,
@@ -80,6 +98,10 @@ pub enum InstructionType {
     Ldh {
         source: AddressingModeByte,
         destination: AddressingModeByte,
+    },
+    Ldhl {
+        source: AddressingModeWord,
+        offset: i8,
     },
     Nop,
     Or {
@@ -211,6 +233,7 @@ pub enum AddressingModeWord {
     Hl,
     Sp,
     Literal(u16),
+    LiteralIndirect(u16),
 }
 
 impl Default for Cpu {
@@ -310,6 +333,7 @@ impl Cpu {
             AddressingModeWord::Hl => self.hl,
             AddressingModeWord::Sp => self.sp,
             AddressingModeWord::Literal(val) => val,
+            AddressingModeWord::LiteralIndirect(address) => self.read_word_address(address),
         }
     }
 
@@ -383,6 +407,7 @@ impl Cpu {
             AddressingModeWord::Hl => self.hl = val,
             AddressingModeWord::Sp => self.sp = val,
             AddressingModeWord::Literal(_) => unreachable!(),
+            AddressingModeWord::LiteralIndirect(address) => self.write_word_address(val, address),
         }
     }
 
@@ -520,7 +545,19 @@ impl Cpu {
                     instruction_type: InstructionType::Rlca,
                     cycles: 4,
                 }
-            },
+            }
+            0x08 => {
+                let address = self.read_word_address(self.pc + 1);
+
+                self.pc += 3;
+                Instruction {
+                    instruction_type: InstructionType::LdWord {
+                        source: AddressingModeWord::Sp,
+                        destination: AddressingModeWord::LiteralIndirect(address),
+                    },
+                    cycles: 20,
+                }
+            }
             0x09 | 0x19 | 0x29 | 0x39 => {
                 let source = match opcode {
                     0x09 => AddressingModeWord::Bc,
@@ -532,11 +569,8 @@ impl Cpu {
 
                 self.pc += 1;
                 Instruction {
-                    instruction_type: InstructionType::AddWord {
-                        source,
-                        destination: AddressingModeWord::Hl,
-                    },
-                    cycles: 8
+                    instruction_type: InstructionType::AddHl { source },
+                    cycles: 8,
                 }
             }
             0x0A | 0x1A | 0x2A | 0x3A => {
@@ -938,6 +972,17 @@ impl Cpu {
                     cycles: 12,
                 }
             }
+            0xE8 => {
+                let source_value = self.read_byte_address(self.pc + 1);
+
+                self.pc += 2;
+                Instruction {
+                    instruction_type: InstructionType::AddSp {
+                        value: source_value as i8,
+                    },
+                    cycles: 16,
+                }
+            }
             0xE9 => {
                 self.pc += 1;
                 Instruction {
@@ -980,6 +1025,36 @@ impl Cpu {
                     cycles: 4,
                 }
             }
+            0xF8 => {
+                let offset = self.read_byte_address(self.pc + 1);
+
+                self.pc += 2;
+                Instruction {
+                    instruction_type: InstructionType::Ldhl {
+                        source: AddressingModeWord::Sp,
+                        offset: offset as i8,
+                    },
+                    cycles: 12,
+                }
+            }
+            0xF9 => {
+                self.pc += 1;
+
+                Instruction {
+                    instruction_type: InstructionType::LdWord {
+                        source: AddressingModeWord::Hl,
+                        destination: AddressingModeWord::Sp,
+                    },
+                    cycles: 8,
+                }
+            }
+            0xFB => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Ei,
+                    cycles: 4,
+                }
+            }
             _ => unreachable!("unknown opcode {:#02X}", opcode),
         }
     }
@@ -990,10 +1065,8 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_add_byte(source, destination),
-            InstructionType::AddWord {
-                source,
-                destination,
-            } => self.execute_add_word(source, destination),
+            InstructionType::AddHl { source } => self.execute_add_hl(source),
+            InstructionType::AddSp { value } => self.execute_add_sp(value),
             InstructionType::Adc {
                 source,
                 destination,
@@ -1009,6 +1082,7 @@ impl Cpu {
             InstructionType::DecByte { target } => self.execute_dec_byte(target),
             InstructionType::DecWord { target } => self.execute_dec_word(target),
             InstructionType::Di => self.interrupt_master_enable = false,
+            InstructionType::Ei => self.interrupt_master_enable = true,
             InstructionType::IncByte { target } => self.execute_inc_byte(target),
             InstructionType::IncWord { target } => self.execute_inc_word(target),
             InstructionType::Jp {
@@ -1033,6 +1107,7 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_ldh(source, destination),
+            InstructionType::Ldhl { source, offset } => self.execute_ldhl(source, offset),
             InstructionType::Nop => {}
             InstructionType::Or { source } => self.execute_or(source),
             InstructionType::Pop { target } => self.execute_pop(target),
@@ -1072,16 +1147,42 @@ impl Cpu {
         self.set_carry_flag(carry_out);
     }
 
-    fn execute_add_word(&mut self, source: AddressingModeWord, destination: AddressingModeWord) {
+    fn execute_add_hl(&mut self, source: AddressingModeWord) {
         let source_value = self.read_word(source);
-        let destination_value = self.read_word(destination);
-        let (result, carry_out) = source_value.overflowing_add(destination_value);
-        self.write_word(result, destination);
+        let destination_value = self.read_word(AddressingModeWord::Hl);
+        let (result, carry_out) = destination_value.overflowing_add(source_value);
+        self.write_word(result, AddressingModeWord::Hl);
 
         self.set_subtract_flag(false);
         self.set_half_carry_flag(
-            (source_value & 0b0001_0000_0000_0000) != (result & 0b0001_0000_0000_0000),
+            (((source_value & 0b0000_1111_1111_1111)
+                + (destination_value & 0b0000_1111_1111_1111))
+                & 0b0001_0000_0000_0000)
+                != 0,
         );
+        self.set_carry_flag(carry_out);
+    }
+
+    fn execute_add_sp(&mut self, value: i8) {
+        let destination_value = self.read_word(AddressingModeWord::Sp);
+        let result = destination_value.wrapping_add(i16::from(value) as u16);
+        self.write_word(result, AddressingModeWord::Sp);
+
+        // sp += value uses value as a signed value (and negative value correctly
+        // affects the entire sp, including carry in from upper byte).
+        //
+        // Flags are only set from the addition of value to the lower byte of sp.
+        // This means that half-carry flag is set if carry from bit 3 -> 4, and
+        // carry flag is set if carry out from bit 7. High byte of sp is ignored
+        // for both half-carry and carry flags.
+        self.set_zero_flag(false);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(
+            ((((value as u8) & 0b0000_1111) + ((destination_value as u8) & 0b0000_1111))
+                & 0b0001_0000)
+                != 0,
+        );
+        let (_, carry_out) = (destination_value as u8).overflowing_add(value as u8);
         self.set_carry_flag(carry_out);
     }
 
@@ -1131,7 +1232,7 @@ impl Cpu {
 
     fn execute_inc_word(&mut self, target: AddressingModeWord) {
         let old_value = self.read_word(target);
-        let new_value = old_value.wrapping_add(old_value);
+        let new_value = old_value.wrapping_add(1);
         self.write_word(new_value, target);
     }
 
@@ -1157,7 +1258,7 @@ impl Cpu {
 
     fn execute_dec_word(&mut self, target: AddressingModeWord) {
         let old_value = self.read_word(target);
-        let new_value = old_value + 1;
+        let new_value = old_value.wrapping_sub(1);
         self.write_word(new_value, target);
     }
 
@@ -1174,6 +1275,28 @@ impl Cpu {
     fn execute_ldh(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
         let value = self.read_byte(source);
         self.write_byte(value, destination);
+    }
+
+    fn execute_ldhl(&mut self, source: AddressingModeWord, offset: i8) {
+        let source_value = self.read_word(source);
+        let result_value = source_value.wrapping_add(i16::from(offset) as u16);
+        self.write_word(result_value, AddressingModeWord::Hl);
+
+        // sp + offset uses offset as a signed value (and negative value correctly
+        // affects the entire sp, including carry in from upper byte).
+        //
+        // Flags are only set from the addition of offset to the lower byte of sp.
+        // This means that half-carry flag is set if carry from bit 3 -> 4, and
+        // carry flag is set if carry out from bit 7. High byte of sp is ignored
+        // for both half-carry and carry flags.
+        self.set_zero_flag(false);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(
+            ((((source_value as u8) & 0b0000_1111) + ((offset as u8) & 0b0000_1111)) & 0b0001_0000)
+                != 0,
+        );
+        let (_, carry_out) = (source_value as u8).overflowing_add(offset as u8);
+        self.set_carry_flag(carry_out);
     }
 
     fn execute_jp(&mut self, target: AddressingModeWord, condition: BranchConditionType) {

@@ -2,7 +2,7 @@ mod cpu;
 
 use cpu::Cpu;
 
-const BINARY: &[u8] = include_bytes!("../cpu_instrs.gb");
+const BINARY: &[u8] = include_bytes!("../03_sp_hl.gb");
 
 fn main() {
     println!("Hello, world!");
@@ -13,5 +13,7 @@ fn main() {
         let decoded = cpu.decode();
         // println!("{:x?}", decoded);
         cpu.execute(decoded);
+        // println!("{:#x?}", cpu);
+        // println!("-------------------------------------------------------------------");
     }
 }
