@@ -8,11 +8,10 @@ fn main() {
     println!("Hello, world!");
     let mut cpu = Cpu::default();
     cpu.memory[..BINARY.len()].copy_from_slice(BINARY);
-    cpu.pc = 0x100;
 
-    for _ in 0.. {
+    loop {
         let decoded = cpu.decode();
-        println!("{:#x?}", decoded);
+        println!("{:x?}", decoded);
         cpu.execute(decoded);
     }
 }
