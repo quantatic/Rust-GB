@@ -2,7 +2,7 @@ mod cpu;
 
 use cpu::Cpu;
 
-const BINARY: &'static [u8] = include_bytes!("../ld.gb");
+const BINARY: &[u8] = include_bytes!("../ld.gb");
 
 fn main() {
     println!("Hello, world!");
@@ -10,12 +10,9 @@ fn main() {
     cpu.memory[..BINARY.len()].copy_from_slice(BINARY);
     cpu.pc = 0x100;
 
-    for i in 0u64.. {
+    for _ in 0.. {
         let decoded = cpu.decode();
-        // println!("{:#x?}", decoded);
+        println!("{:#x?}", decoded);
         cpu.execute(decoded);
-        if i % 1_000_000 == 0 {
-            println!("step {}", i);
-        }
     }
 }

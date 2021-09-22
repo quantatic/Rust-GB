@@ -1,14 +1,12 @@
-use std::ops::Add;
-
 #[derive(Debug)]
 pub struct Cpu {
-    pub accumulator: u8,
-    pub flags: u8,
+    pub af: u16,
     pub bc: u16,
     pub de: u16,
     pub hl: u16,
     pub sp: u16,
     pub pc: u16,
+    pub interrupt_master_enable: bool,
     pub memory: [u8; 0x10000],
 }
 
@@ -36,22 +34,13 @@ pub enum InstructionType {
     And {
         source: AddressingModeByte,
     },
+    Call {
+        address: u16,
+        taken_penalty: u16,
+        condition: BranchConditionType,
+    },
     Cp {
         source: AddressingModeByte,
-    },
-    Sbc {
-        source: AddressingModeByte,
-        destination: AddressingModeByte,
-    },
-    Sub {
-        source: AddressingModeByte,
-        destination: AddressingModeByte,
-    },
-    IncByte {
-        target: AddressingModeByte,
-    },
-    IncWord {
-        target: AddressingModeWord,
     },
     DecByte {
         target: AddressingModeByte,
@@ -59,7 +48,14 @@ pub enum InstructionType {
     DecWord {
         target: AddressingModeWord,
     },
+    Di,
     Halt,
+    IncByte {
+        target: AddressingModeByte,
+    },
+    IncWord {
+        target: AddressingModeWord,
+    },
     Jp {
         address: u16,
         taken_penalty: u16,
@@ -78,13 +74,31 @@ pub enum InstructionType {
         source: AddressingModeWord,
         destination: AddressingModeWord,
     },
+    Ldh {
+        source: AddressingModeByte,
+        destination: AddressingModeByte,
+    },
     Nop,
     Or {
         source: AddressingModeByte,
     },
+    Pop {
+        target: AddressingModeWord,
+    },
+    Push {
+        source: AddressingModeWord,
+    },
     Ret {
         taken_penalty: u16,
         condition: BranchConditionType,
+    },
+    Sbc {
+        source: AddressingModeByte,
+        destination: AddressingModeByte,
+    },
+    Sub {
+        source: AddressingModeByte,
+        destination: AddressingModeByte,
     },
     Xor {
         source: AddressingModeByte,
@@ -141,6 +155,7 @@ impl AddressingModeByte {
 
 #[derive(Clone, Copy, Debug)]
 pub enum AddressingModeWord {
+    Af,
     Bc,
     De,
     Hl,
@@ -151,13 +166,13 @@ pub enum AddressingModeWord {
 impl Default for Cpu {
     fn default() -> Self {
         Self {
-            accumulator: 0,
-            flags: 0,
+            af: 0,
             bc: 0,
             de: 0,
             hl: 0,
             sp: 0,
             pc: 0,
+            interrupt_master_enable: false,
             memory: [0; 0x10000],
         }
     }
@@ -176,7 +191,7 @@ impl Cpu {
 
     fn read_byte(&mut self, location: AddressingModeByte) -> u8 {
         match location {
-            AddressingModeByte::Accumulator => self.accumulator,
+            AddressingModeByte::Accumulator => (self.af >> 8) as u8,
             AddressingModeByte::B => (self.bc >> 8) as u8,
             AddressingModeByte::C => self.bc as u8,
             AddressingModeByte::D => (self.de >> 8) as u8,
@@ -203,6 +218,7 @@ impl Cpu {
 
     fn read_word(&mut self, location: AddressingModeWord) -> u16 {
         match location {
+            AddressingModeWord::Af => self.af,
             AddressingModeWord::Bc => self.bc,
             AddressingModeWord::De => self.de,
             AddressingModeWord::Hl => self.hl,
@@ -224,7 +240,10 @@ impl Cpu {
 
     fn write_byte(&mut self, val: u8, location: AddressingModeByte) {
         match location {
-            AddressingModeByte::Accumulator => self.accumulator = val,
+            AddressingModeByte::Accumulator => {
+                self.af &= !0xFF00;
+                self.af |= u16::from(val) << 8;
+            }
             AddressingModeByte::B => {
                 self.bc &= !0xFF00;
                 self.bc |= u16::from(val) << 8;
@@ -267,6 +286,7 @@ impl Cpu {
 
     fn write_word(&mut self, val: u16, location: AddressingModeWord) {
         match location {
+            AddressingModeWord::Af => self.af = val,
             AddressingModeWord::Bc => self.bc = val,
             AddressingModeWord::De => self.de = val,
             AddressingModeWord::Hl => self.hl = val,
@@ -426,7 +446,7 @@ impl Cpu {
                 self.pc += 2;
                 Instruction {
                     instruction_type: InstructionType::LdByte {
-                        source: AddressingModeByte::Literal(n.into()),
+                        source: AddressingModeByte::Literal(n),
                         destination: r,
                     },
                     cycles,
@@ -584,6 +604,22 @@ impl Cpu {
                     opcode,
                 }
             }
+            0xC1 | 0xD1 | 0xE1 | 0xF1 => {
+                let target = match opcode {
+                    0xC1 => AddressingModeWord::Bc,
+                    0xD1 => AddressingModeWord::De,
+                    0xE1 => AddressingModeWord::Hl,
+                    0xF1 => AddressingModeWord::Af,
+                    _ => unreachable!(),
+                };
+
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Pop { target },
+                    cycles: 12,
+                    opcode,
+                }
+            }
             0xC2 | 0xCA | 0xD2 | 0xDA => {
                 fn get_branch_condition_type(val: u8) -> BranchConditionType {
                     match val {
@@ -623,6 +659,47 @@ impl Cpu {
                     opcode,
                 }
             }
+            0xC5 | 0xD5 | 0xE5 | 0xF5 => {
+                let source = match opcode {
+                    0xC5 => AddressingModeWord::Bc,
+                    0xD5 => AddressingModeWord::De,
+                    0xE5 => AddressingModeWord::Hl,
+                    0xF5 => AddressingModeWord::Af,
+                    _ => unreachable!(),
+                };
+
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Push { source },
+                    cycles: 16,
+                    opcode,
+                }
+            }
+            0xC9 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Ret {
+                        taken_penalty: 0,
+                        condition: BranchConditionType::Unconditional,
+                    },
+                    cycles: 16,
+                    opcode,
+                }
+            }
+            0xCD => {
+                let address = self.read_word_address(self.pc + 1);
+
+                self.pc += 3;
+                Instruction {
+                    instruction_type: InstructionType::Call {
+                        address,
+                        taken_penalty: 0,
+                        condition: BranchConditionType::Unconditional,
+                    },
+                    cycles: 24,
+                    opcode,
+                }
+            }
             0xC6 | 0xCE | 0xD6 | 0xDE | 0xE6 | 0xEE | 0xF6 | 0xFE => {
                 let source = AddressingModeByte::Literal(self.read_byte_address(self.pc + 1));
 
@@ -657,6 +734,64 @@ impl Cpu {
                     opcode,
                 }
             }
+            0xE0 | 0xF0 => {
+                let offset = self.read_byte_address(self.pc + 1);
+                let address = 0xFF00 + u16::from(offset);
+                let (source, destination) = match opcode {
+                    0xE0 => (
+                        AddressingModeByte::Accumulator,
+                        AddressingModeByte::LiteralIndirect(address),
+                    ),
+                    0xF0 => (
+                        AddressingModeByte::LiteralIndirect(address),
+                        AddressingModeByte::Accumulator,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                self.pc += 2;
+                Instruction {
+                    instruction_type: InstructionType::Ldh {
+                        source,
+                        destination,
+                    },
+                    cycles: 12,
+                    opcode,
+                }
+            }
+            0xEA | 0xFA => {
+                let address = self.read_word_address(self.pc + 1);
+
+                let (source, destination) = match opcode {
+                    0xEA => (
+                        AddressingModeByte::Accumulator,
+                        AddressingModeByte::LiteralIndirect(address),
+                    ),
+                    0xFA => (
+                        AddressingModeByte::LiteralIndirect(address),
+                        AddressingModeByte::Accumulator,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                self.pc += 3;
+                Instruction {
+                    instruction_type: InstructionType::LdByte {
+                        source,
+                        destination,
+                    },
+                    cycles: 16,
+                    opcode,
+                }
+            }
+            0xF3 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Di,
+                    cycles: 4,
+                    opcode,
+                }
+            }
             _ => unreachable!("unknown opcode {:#02X}", opcode),
         }
     }
@@ -676,6 +811,14 @@ impl Cpu {
                 destination,
             } => self.execute_adc(source, destination),
             InstructionType::And { source } => self.execute_and(source),
+            InstructionType::Call {
+                address,
+                taken_penalty,
+                condition,
+            } => self.execute_call(address, condition),
+            InstructionType::DecByte { target } => self.execute_dec_byte(target),
+            InstructionType::DecWord { target } => self.execute_dec_word(target),
+            InstructionType::Di => self.interrupt_master_enable = false,
             InstructionType::IncByte { target } => self.execute_inc_byte(target),
             InstructionType::IncWord { target } => self.execute_inc_word(target),
             InstructionType::LdByte {
@@ -686,6 +829,10 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_ld_word(source, destination),
+            InstructionType::Ldh {
+                source,
+                destination,
+            } => self.execute_ldh(source, destination),
             InstructionType::Jp {
                 address,
                 taken_penalty,
@@ -697,6 +844,8 @@ impl Cpu {
                 condition,
             } => self.execute_jr(offset, condition),
             InstructionType::Nop => {}
+            InstructionType::Pop { target } => self.execute_pop(target),
+            InstructionType::Push { source } => self.execute_push(source),
             InstructionType::Ret {
                 taken_penalty,
                 condition,
@@ -730,16 +879,45 @@ impl Cpu {
 
     fn execute_and(&mut self, source: AddressingModeByte) {
         let source_value = self.read_byte(source) as u8;
-        self.accumulator &= source_value;
+        let destination_value = self.read_byte(AddressingModeByte::Accumulator) & source_value;
+        self.write_byte(destination_value, AddressingModeByte::Accumulator);
+    }
+
+    fn execute_call(&mut self, address: u16, condition: BranchConditionType) {
+        if self.should_branch(condition) {
+            self.sp -= 2;
+            self.write_word_address(self.pc, self.sp);
+            self.pc = address;
+        }
     }
 
     fn execute_inc_byte(&mut self, target: AddressingModeByte) {
         let old_value = self.read_byte(target);
         let new_value = old_value.wrapping_add(1);
         self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_sign_flag(false);
+        self.set_half_carry_flag((old_value & 0b00001000 != 0) && (new_value & 0b00001000 == 0));
     }
 
     fn execute_inc_word(&mut self, target: AddressingModeWord) {
+        let old_value = self.read_word(target);
+        let new_value = old_value + 1;
+        self.write_word(new_value, target);
+    }
+
+    fn execute_dec_byte(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let new_value = old_value.wrapping_sub(1);
+        self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_sign_flag(true);
+        self.set_half_carry_flag(!((old_value & 0b00001000 == 0) && (new_value & 0b00001000 != 0)));
+    }
+
+    fn execute_dec_word(&mut self, target: AddressingModeWord) {
         let old_value = self.read_word(target);
         let new_value = old_value + 1;
         self.write_word(new_value, target);
@@ -755,6 +933,11 @@ impl Cpu {
         self.write_word(value, destination);
     }
 
+    fn execute_ldh(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+        let value = self.read_byte(source);
+        self.write_byte(value, destination);
+    }
+
     fn execute_jp(&mut self, address: u16, condition: BranchConditionType) {
         if self.should_branch(condition) {
             self.pc = address;
@@ -768,6 +951,18 @@ impl Cpu {
             // unsigned.
             self.pc = self.pc.wrapping_add(offset as u16);
         }
+    }
+
+    fn execute_pop(&mut self, target: AddressingModeWord) {
+        let value = self.read_word_address(self.sp);
+        self.sp += 2;
+        self.write_word(value, target);
+    }
+
+    fn execute_push(&mut self, source: AddressingModeWord) {
+        let value = self.read_word(source);
+        self.sp -= 2;
+        self.write_word_address(value, self.sp);
     }
 
     fn execute_ret(&mut self, condition: BranchConditionType) {
@@ -790,56 +985,56 @@ impl Cpu {
 }
 
 impl Cpu {
-    const ZERO_FLAG_MASK: u8 = 0b10000000;
-    const SIGN_FLAG_MASK: u8 = 0b01000000;
-    const HALF_CARRY_FLAG_MASK: u8 = 0b00100000;
-    const CARRY_FLAG_MASK: u8 = 0b00010000;
+    const ZERO_FLAG_MASK: u16 = 0b00000000_1000_0000;
+    const SIGN_FLAG_MASK: u16 = 0b00000000_0100_0000;
+    const HALF_CARRY_FLAG_MASK: u16 = 0b00000000_0010_0000;
+    const CARRY_FLAG_MASK: u16 = 0b00000000_0001_0000;
 
     fn get_zero_flag(&self) -> bool {
-        (self.flags & Self::ZERO_FLAG_MASK) != 0
+        (self.af & Self::ZERO_FLAG_MASK) != 0
     }
 
     fn get_sign_flag(&self) -> bool {
-        (self.flags & Self::SIGN_FLAG_MASK) != 0
+        (self.af & Self::SIGN_FLAG_MASK) != 0
     }
 
     fn get_half_carry_flag(&self) -> bool {
-        (self.flags & Self::HALF_CARRY_FLAG_MASK) != 0
+        (self.af & Self::HALF_CARRY_FLAG_MASK) != 0
     }
 
     fn get_carry_flag(&self) -> bool {
-        (self.flags & Self::CARRY_FLAG_MASK) != 0
+        (self.af & Self::CARRY_FLAG_MASK) != 0
     }
 
     fn set_zero_flag(&mut self, set: bool) {
         if set {
-            self.flags |= Self::ZERO_FLAG_MASK;
+            self.af |= Self::ZERO_FLAG_MASK;
         } else {
-            self.flags &= !Self::ZERO_FLAG_MASK;
+            self.af &= !Self::ZERO_FLAG_MASK;
         }
     }
 
     fn set_sign_flag(&mut self, set: bool) {
         if set {
-            self.flags |= Self::SIGN_FLAG_MASK;
+            self.af |= Self::SIGN_FLAG_MASK;
         } else {
-            self.flags &= !Self::SIGN_FLAG_MASK;
+            self.af &= !Self::SIGN_FLAG_MASK;
         }
     }
 
     fn set_half_carry_flag(&mut self, set: bool) {
         if set {
-            self.flags |= Self::HALF_CARRY_FLAG_MASK;
+            self.af |= Self::HALF_CARRY_FLAG_MASK;
         } else {
-            self.flags &= !Self::HALF_CARRY_FLAG_MASK;
+            self.af &= !Self::HALF_CARRY_FLAG_MASK;
         }
     }
 
     fn set_carry_flag(&mut self, set: bool) {
         if set {
-            self.flags |= Self::CARRY_FLAG_MASK;
+            self.af |= Self::CARRY_FLAG_MASK;
         } else {
-            self.flags &= !Self::CARRY_FLAG_MASK;
+            self.af &= !Self::CARRY_FLAG_MASK;
         }
     }
 }
