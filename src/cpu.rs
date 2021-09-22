@@ -35,7 +35,7 @@ pub enum InstructionType {
     },
     Bit {
         target: AddressingModeByte,
-        mask: u8,
+        bit: u8,
     },
     Call {
         address: u16,
@@ -93,7 +93,7 @@ pub enum InstructionType {
     },
     Res {
         target: AddressingModeByte,
-        mask: u8,
+        bit: u8,
     },
     Ret {
         taken_penalty: u16,
@@ -124,7 +124,7 @@ pub enum InstructionType {
     },
     Set {
         target: AddressingModeByte,
-        mask: u8,
+        bit: u8,
     },
     Sra {
         target: AddressingModeByte,
@@ -265,7 +265,7 @@ impl Default for Cpu {
 impl Cpu {
     fn read_byte_address(&self, address: u16) -> u8 {
         let result = self.memory[usize::from(address)];
-        println!("memory[{:#X}] -> {:#X}", address, result);
+        // println!("memory[{:#X}] -> {:#X}", address, result);
         result
     }
 
@@ -315,11 +315,11 @@ impl Cpu {
 
     fn write_byte_address(&mut self, value: u8, address: u16) {
         if address == 0xFF01 {
-            println!("{}", value);
+            print!("{}", char::from(value));
         }
 
         self.memory[usize::from(address)] = value;
-        println!("{:#X} -> memory[{:#X}]", value, address);
+        // println!("{:#X} -> memory[{:#X}]", value, address);
     }
 
     fn write_word_address(&mut self, value: u16, address: u16) {
@@ -519,6 +519,24 @@ impl Cpu {
                 Instruction {
                     instruction_type: InstructionType::Rlca,
                     cycles: 4,
+                }
+            },
+            0x09 | 0x19 | 0x29 | 0x39 => {
+                let source = match opcode {
+                    0x09 => AddressingModeWord::Bc,
+                    0x19 => AddressingModeWord::De,
+                    0x29 => AddressingModeWord::Hl,
+                    0x39 => AddressingModeWord::Sp,
+                    _ => unreachable!(),
+                };
+
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::AddWord {
+                        source,
+                        destination: AddressingModeWord::Hl,
+                    },
+                    cycles: 8
                 }
             }
             0x0A | 0x1A | 0x2A | 0x3A => {
@@ -821,9 +839,37 @@ impl Cpu {
                     _ => unreachable!(),
                 };
 
-                let instruction_type = match cb_postfix & 0b11111000 {
-                    _ => unimplemented!(),
+                let instruction_type = match (cb_postfix & 0b11111000) >> 3 {
+                    0b00000 => InstructionType::Rlc { target },
+                    0b00001 => InstructionType::Rrc { target },
+                    0b00010 => InstructionType::Rl { target },
+                    0b00011 => InstructionType::Rr { target },
+                    0b00100 => InstructionType::Sla { target },
+                    0b00101 => InstructionType::Sra { target },
+                    0b00110 => InstructionType::Swap { target },
+                    0b00111 => InstructionType::Srl { target },
+                    0b01000..=0b01111 => {
+                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        InstructionType::Bit { target, bit }
+                    }
+                    0b10000..=0b10111 => {
+                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        InstructionType::Res { target, bit }
+                    }
+                    0b11000..=0b11111 => {
+                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        InstructionType::Set { target, bit }
+                    }
+                    _ => unreachable!(),
                 };
+
+                let cycles = if target.is_indirect() { 16 } else { 8 };
+
+                self.pc += 2;
+                Instruction {
+                    instruction_type,
+                    cycles,
+                }
             }
             0xCD => {
                 let address = self.read_word_address(self.pc + 1);
@@ -953,6 +999,7 @@ impl Cpu {
                 destination,
             } => self.execute_adc(source, destination),
             InstructionType::And { source } => self.execute_and(source),
+            InstructionType::Bit { target, bit } => self.execute_bit(target, bit),
             InstructionType::Call {
                 address,
                 taken_penalty,
@@ -964,6 +1011,16 @@ impl Cpu {
             InstructionType::Di => self.interrupt_master_enable = false,
             InstructionType::IncByte { target } => self.execute_inc_byte(target),
             InstructionType::IncWord { target } => self.execute_inc_word(target),
+            InstructionType::Jp {
+                target,
+                taken_penalty,
+                condition,
+            } => self.execute_jp(target, condition),
+            InstructionType::Jr {
+                offset,
+                taken_penalty,
+                condition,
+            } => self.execute_jr(offset, condition),
             InstructionType::LdByte {
                 source,
                 destination,
@@ -976,29 +1033,29 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_ldh(source, destination),
-            InstructionType::Jp {
-                target,
-                taken_penalty,
-                condition,
-            } => self.execute_jp(target, condition),
-            InstructionType::Jr {
-                offset,
-                taken_penalty,
-                condition,
-            } => self.execute_jr(offset, condition),
             InstructionType::Nop => {}
             InstructionType::Or { source } => self.execute_or(source),
             InstructionType::Pop { target } => self.execute_pop(target),
             InstructionType::Push { source } => self.execute_push(source),
+            InstructionType::Res { target, bit } => self.execute_res(target, bit),
             InstructionType::Ret {
                 taken_penalty,
                 condition,
             } => self.execute_ret(condition),
+            InstructionType::Rl { target } => self.execute_rl(target),
             InstructionType::Rla => self.execute_rla(),
+            InstructionType::Rlc { target } => self.execute_rlc(target),
             InstructionType::Rlca => self.execute_rlca(),
+            InstructionType::Rr { target } => self.execute_rr(target),
             InstructionType::Rra => self.execute_rra(),
+            InstructionType::Rrc { target } => self.execute_rrc(target),
             InstructionType::Rrca => self.execute_rrca(),
+            InstructionType::Set { target, bit } => self.execute_set(target, bit),
+            InstructionType::Sla { target } => self.execute_sla(target),
+            InstructionType::Sra { target } => self.execute_sra(target),
+            InstructionType::Srl { target } => self.execute_srl(target),
             InstructionType::Sub { source } => self.execute_sub(source),
+            InstructionType::Swap { target } => self.execute_swap(target),
             InstructionType::Xor { source } => self.execute_xor(source),
             _ => unreachable!("don't know how to execute:\n{:#x?}", instruction),
         };
@@ -1023,7 +1080,7 @@ impl Cpu {
 
         self.set_subtract_flag(false);
         self.set_half_carry_flag(
-            (source_value & 0b0001_0000_0000_0000) != (result & 0b0000_0001_0000_0000),
+            (source_value & 0b0001_0000_0000_0000) != (result & 0b0001_0000_0000_0000),
         );
         self.set_carry_flag(carry_out);
     }
@@ -1046,6 +1103,12 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(true);
         self.set_carry_flag(false);
+    }
+
+    fn execute_bit(&mut self, target: AddressingModeByte, bit: u8) {
+        let source_value = self.read_byte(target);
+
+        self.set_zero_flag((source_value & (1 << bit)) != 0)
     }
 
     fn execute_call(&mut self, address: u16, condition: BranchConditionType) {
@@ -1151,12 +1214,29 @@ impl Cpu {
         self.write_word_address(value, self.sp);
     }
 
+    fn execute_res(&mut self, target: AddressingModeByte, bit: u8) {
+        let source_value = self.read_byte(target);
+        let result_value = source_value & !(1 << bit);
+        self.write_byte(result_value, target);
+    }
+
     fn execute_ret(&mut self, condition: BranchConditionType) {
         if self.should_branch(condition) {
             let return_address = self.read_word_address(self.sp);
             self.sp += 2;
             self.pc = return_address;
         }
+    }
+
+    fn execute_rl(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let new_value = (old_value << 1) | (self.get_carry_flag() as u8);
+        self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b1000_0000) != 0);
     }
 
     fn execute_rla(&mut self) {
@@ -1170,6 +1250,17 @@ impl Cpu {
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
     }
 
+    fn execute_rlc(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let new_value = old_value.rotate_left(1);
+        self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b1000_0000) != 0);
+    }
+
     fn execute_rlca(&mut self) {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator = old_accumulator.rotate_left(1);
@@ -1179,6 +1270,17 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
+    }
+
+    fn execute_rr(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let new_value = (old_value >> 1) | (self.get_carry_flag() as u8).rotate_right(1);
+        self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b0000_0001) != 0);
     }
 
     fn execute_rra(&mut self) {
@@ -1193,6 +1295,17 @@ impl Cpu {
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
     }
 
+    fn execute_rrc(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let new_value = old_value.rotate_right(1);
+        self.write_byte(new_value, target);
+
+        self.set_zero_flag(new_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b0000_0001) != 0);
+    }
+
     fn execute_rrca(&mut self) {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator = old_accumulator.rotate_right(1);
@@ -1202,6 +1315,47 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
+    }
+
+    fn execute_set(&mut self, target: AddressingModeByte, bit: u8) {
+        let old_value = self.read_byte(target);
+        let result_value = old_value | (1 << bit);
+        self.write_byte(result_value, target);
+    }
+
+    fn execute_sla(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        let result_value = old_value << 1;
+        self.write_byte(result_value, target);
+
+        self.set_zero_flag(result_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b1000_0000) != 0);
+    }
+
+    fn execute_sra(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        // Signed right shift performs sign extension.
+        let result_value = ((old_value as i8) >> 1) as u8;
+        self.write_byte(result_value, target);
+
+        self.set_zero_flag(result_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b0000_0001) != 0);
+    }
+
+    fn execute_srl(&mut self, target: AddressingModeByte) {
+        let old_value = self.read_byte(target);
+        // Signed right shift performs sign extension.
+        let result_value = old_value >> 1;
+        self.write_byte(result_value, target);
+
+        self.set_zero_flag(result_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag((old_value & 0b0000_0001) != 0);
     }
 
     fn execute_sub(&mut self, source: AddressingModeByte) {
@@ -1215,6 +1369,18 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag((source_value & 0b0001_0000) != (result_value & 0b0001_0000));
         self.set_carry_flag(!carry_in);
+    }
+    fn execute_swap(&mut self, target: AddressingModeByte) {
+        let source_value = self.read_byte(target);
+        // Original low nibble will be shifted out when shifting right, and likewise,
+        // original high nibble will be shifted out when shifting left.
+        let result_value = (source_value >> 4) | (source_value << 4);
+        self.write_byte(result_value, target);
+
+        self.set_zero_flag(result_value == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag(false);
     }
 
     fn execute_xor(&mut self, source: AddressingModeByte) {
