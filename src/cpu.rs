@@ -516,13 +516,14 @@ impl Cpu {
             0x06 | 0x0E | 0x16 | 0x1E | 0x26 | 0x2E | 0x36 | 0x3E => {
                 fn get_addressing_mode(val: u8) -> AddressingModeByte {
                     match val {
-                        0b111 => AddressingModeByte::Accumulator,
                         0b000 => AddressingModeByte::B,
                         0b001 => AddressingModeByte::C,
-                        0b101 => AddressingModeByte::D,
+                        0b010 => AddressingModeByte::D,
                         0b011 => AddressingModeByte::E,
                         0b100 => AddressingModeByte::H,
+                        0b101 => AddressingModeByte::L,
                         0b110 => AddressingModeByte::HlIndirect,
+                        0b111 => AddressingModeByte::Accumulator,
                         _ => unreachable!(),
                     }
                 }
@@ -1125,6 +1126,10 @@ impl Cpu {
             InstructionType::Rra => self.execute_rra(),
             InstructionType::Rrc { target } => self.execute_rrc(target),
             InstructionType::Rrca => self.execute_rrca(),
+            InstructionType::Sbc {
+                source,
+                destination,
+            } => self.execute_sbc(source, destination),
             InstructionType::Set { target, bit } => self.execute_set(target, bit),
             InstructionType::Sla { target } => self.execute_sla(target),
             InstructionType::Sra { target } => self.execute_sra(target),
@@ -1138,12 +1143,15 @@ impl Cpu {
 
     fn execute_add_byte(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
         let source_value = self.read_byte(source);
-        let (result, carry_out) = self.read_byte(destination).overflowing_add(source_value);
+        let destination_value = self.read_byte(destination);
+        let (result, carry_out) = destination_value.overflowing_add(source_value);
+        let half_carry =
+            (((source_value & 0b0000_1111) + (destination_value & 0b0000_1111)) & 0b0001_0000) != 0;
         self.write_byte(result, destination);
 
         self.set_zero_flag(result == 0);
         self.set_subtract_flag(false);
-        self.set_half_carry_flag((source_value & 0b0001_0000) != (result & 0b0001_0000));
+        self.set_half_carry_flag(half_carry);
         self.set_carry_flag(carry_out);
     }
 
@@ -1189,10 +1197,30 @@ impl Cpu {
     fn execute_adc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(destination);
-        let result = source_value
-            .wrapping_add(destination_value)
-            .wrapping_add(self.get_carry_flag() as u8);
+        let (result, half_carry, carry) = if self.get_carry_flag() {
+            let (intermediate_result, carry_one) = source_value.overflowing_add(destination_value);
+            let (result, carry_two) = intermediate_result.overflowing_add(1);
+            let half_carry =
+                (((source_value & 0b0000_1111) + (destination_value & 0b0000_1111) + 1)
+                    & 0b0001_0000)
+                    != 0;
+
+            (result, half_carry, carry_one | carry_two)
+        } else {
+            let (result, carry) = source_value.overflowing_add(destination_value);
+            let half_carry = (((source_value & 0b0000_1111) + (destination_value & 0b0000_1111))
+                & 0b0001_0000)
+                != 0;
+
+            (result, half_carry, carry)
+        };
+
         self.write_byte(result, destination);
+
+        self.set_zero_flag(result == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(half_carry);
+        self.set_carry_flag(carry);
     }
 
     fn execute_and(&mut self, source: AddressingModeByte) {
@@ -1316,13 +1344,14 @@ impl Cpu {
 
     fn execute_or(&mut self, source: AddressingModeByte) {
         let source_value = self.read_byte(source);
-        let result_value = self.read_byte(AddressingModeByte::Accumulator) | source_value;
+        let destination_value = self.read_byte(AddressingModeByte::Accumulator);
+        let result_value = source_value | destination_value;
         self.write_byte(result_value, AddressingModeByte::Accumulator);
 
         self.set_zero_flag(result_value == 0);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
-        self.set_half_carry_flag(false);
+        self.set_carry_flag(false);
     }
 
     fn execute_pop(&mut self, target: AddressingModeWord) {
@@ -1440,6 +1469,35 @@ impl Cpu {
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
     }
 
+    // Some gameboy documentation has carry/half-carry documentation backwards for this op.
+    // Carry and half-carry flags are set when there is a borrow-in to bit 7 for carry flag,
+    // or borrow-in to bit 3 for half-carry flag, respectively.
+    fn execute_sbc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+        let source_value = self.read_byte(source);
+        let destination_value = self.read_byte(destination);
+
+        let (result, half_carry, carry) = if self.get_carry_flag() {
+            let (intermediate_result, borrow_one) = destination_value.overflowing_sub(source_value);
+            let (result, borrow_two) = intermediate_result.overflowing_sub(1);
+            let half_borrow =
+                (destination_value & 0b0000_1111) < ((source_value & 0b0000_1111) + 1);
+
+            (result, half_borrow, borrow_one | borrow_two)
+        } else {
+            let (result, borrow) = destination_value.overflowing_sub(source_value);
+            let half_borrow = (destination_value & 0b0000_1111) < (source_value & 0b0000_1111);
+
+            (result, half_borrow, borrow)
+        };
+
+        self.write_byte(result, destination);
+
+        self.set_zero_flag(result == 0);
+        self.set_subtract_flag(true);
+        self.set_half_carry_flag(half_carry);
+        self.set_carry_flag(carry);
+    }
+
     fn execute_set(&mut self, target: AddressingModeByte, bit: u8) {
         let old_value = self.read_byte(target);
         let result_value = old_value | (1 << bit);
@@ -1481,17 +1539,21 @@ impl Cpu {
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
     }
 
+    // Some gameboy documentation has carry/half-carry documentation backwards for this op.
+    // Carry and half-carry flags are set when there is a borrow-in to bit 7 for carry flag,
+    // or borrow-in to bit 3 for half-carry flag, respectively.
     fn execute_sub(&mut self, source: AddressingModeByte) {
         let source_value = self.read_byte(source);
-        let (result_value, carry_in) = self
-            .read_byte(AddressingModeByte::Accumulator)
-            .overflowing_sub(source_value);
+        let destination_value = self.read_byte(AddressingModeByte::Accumulator);
+        let (result_value, carry_in) = destination_value.overflowing_sub(source_value);
+        let half_carry_in = (destination_value & 0b0000_1111) < (source_value & 0b0000_1111);
+
         self.write_byte(result_value, AddressingModeByte::Accumulator);
 
         self.set_zero_flag(result_value == 0);
         self.set_subtract_flag(true);
-        self.set_half_carry_flag((source_value & 0b0001_0000) != (result_value & 0b0001_0000));
-        self.set_carry_flag(!carry_in);
+        self.set_half_carry_flag(half_carry_in);
+        self.set_carry_flag(carry_in);
     }
     fn execute_swap(&mut self, target: AddressingModeByte) {
         let source_value = self.read_byte(target);

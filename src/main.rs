@@ -2,7 +2,7 @@ mod cpu;
 
 use cpu::Cpu;
 
-const BINARY: &[u8] = include_bytes!("../03_sp_hl.gb");
+const BINARY: &[u8] = include_bytes!("../04_op_r_imm.gb");
 
 fn main() {
     println!("Hello, world!");
