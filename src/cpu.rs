@@ -931,15 +931,15 @@ impl Cpu {
                     0b00110 => InstructionType::Swap { target },
                     0b00111 => InstructionType::Srl { target },
                     0b01000..=0b01111 => {
-                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        let bit = (cb_postfix & 0b00111000) >> 3;
                         InstructionType::Bit { target, bit }
                     }
                     0b10000..=0b10111 => {
-                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        let bit = (cb_postfix & 0b00111000) >> 3;
                         InstructionType::Res { target, bit }
                     }
                     0b11000..=0b11111 => {
-                        let bit = (cb_postfix & 0b01110000) >> 4;
+                        let bit = (cb_postfix & 0b00111000) >> 3;
                         InstructionType::Set { target, bit }
                     }
                     _ => unreachable!(),
@@ -1314,7 +1314,9 @@ impl Cpu {
     fn execute_bit(&mut self, target: AddressingModeByte, bit: u8) {
         let source_value = self.read_byte(target);
 
-        self.set_zero_flag((source_value & (1 << bit)) != 0)
+        self.set_zero_flag((source_value & (1 << bit)) == 0);
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(true);
     }
 
     fn execute_call(&mut self, address: u16, condition: BranchConditionType) {
