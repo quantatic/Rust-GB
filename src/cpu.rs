@@ -59,9 +59,11 @@ pub enum InstructionType {
         taken_penalty: u16,
         condition: BranchConditionType,
     },
+    Ccf,
     Cp {
         source: AddressingModeByte,
     },
+    Cpl,
     DecByte {
         target: AddressingModeByte,
     },
@@ -94,10 +96,6 @@ pub enum InstructionType {
     LdWord {
         source: AddressingModeWord,
         destination: AddressingModeWord,
-    },
-    Ldh {
-        source: AddressingModeByte,
-        destination: AddressingModeByte,
     },
     Ldhl {
         source: AddressingModeWord,
@@ -145,12 +143,13 @@ pub enum InstructionType {
         source: AddressingModeByte,
         destination: AddressingModeByte,
     },
-    Sla {
-        target: AddressingModeByte,
-    },
+    Scf,
     Set {
         target: AddressingModeByte,
         bit: u8,
+    },
+    Sla {
+        target: AddressingModeByte,
     },
     Sra {
         target: AddressingModeByte,
@@ -673,6 +672,27 @@ impl Cpu {
                     cycles: 8,
                 }
             }
+            0x2F => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Cpl,
+                    cycles: 4,
+                }
+            }
+            0x37 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Scf,
+                    cycles: 4,
+                }
+            }
+            0x3F => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Ccf,
+                    cycles: 4,
+                }
+            }
             0x40 | 0x41 | 0x42 | 0x43 | 0x44 | 0x45 | 0x46 | 0x47 | 0x48 | 0x49 | 0x4A | 0x4B
             | 0x4C | 0x4D | 0x4E | 0x4F | 0x50 | 0x51 | 0x52 | 0x53 | 0x54 | 0x55 | 0x56 | 0x57
             | 0x58 | 0x59 | 0x5A | 0x5B | 0x5C | 0x5D | 0x5E | 0x5F | 0x60 | 0x61 | 0x62 | 0x63
@@ -1135,7 +1155,9 @@ impl Cpu {
                 taken_penalty,
                 condition,
             } => self.execute_call(address, condition),
+            InstructionType::Ccf => self.execute_ccf(),
             InstructionType::Cp { source } => self.execute_cp(source),
+            InstructionType::Cpl => self.execute_cpl(),
             InstructionType::DecByte { target } => self.execute_dec_byte(target),
             InstructionType::DecWord { target } => self.execute_dec_word(target),
             InstructionType::Di => self.interrupt_master_enable = false,
@@ -1160,10 +1182,6 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_ld_word(source, destination),
-            InstructionType::Ldh {
-                source,
-                destination,
-            } => self.execute_ldh(source, destination),
             InstructionType::Ldhl { source, offset } => self.execute_ldhl(source, offset),
             InstructionType::Nop => {}
             InstructionType::Or { source } => self.execute_or(source),
@@ -1188,6 +1206,7 @@ impl Cpu {
                 source,
                 destination,
             } => self.execute_sbc(source, destination),
+            InstructionType::Scf => self.execute_scf(),
             InstructionType::Set { target, bit } => self.execute_set(target, bit),
             InstructionType::Sla { target } => self.execute_sla(target),
             InstructionType::Sra { target } => self.execute_sra(target),
@@ -1322,6 +1341,15 @@ impl Cpu {
         self.write_word(new_value, target);
     }
 
+    fn execute_ccf(&mut self) {
+        let old_carry_flag = self.get_carry_flag();
+        let new_carry_flag = !old_carry_flag;
+
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag(new_carry_flag);
+    }
+
     fn execute_cp(&mut self, source: AddressingModeByte) {
         let source_value = self.read_byte(source);
         let accumulator_value = self.read_byte(AddressingModeByte::Accumulator);
@@ -1330,6 +1358,14 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag((accumulator_value & 0b0000_1111) < (source_value & 0b0000_1111));
         self.set_carry_flag(accumulator_value < source_value);
+    }
+
+    fn execute_cpl(&mut self) {
+        let source_value = self.read_byte(AddressingModeByte::Accumulator);
+        self.write_byte(!source_value, AddressingModeByte::Accumulator);
+
+        self.set_subtract_flag(true);
+        self.set_half_carry_flag(true);
     }
 
     fn execute_dec_byte(&mut self, target: AddressingModeByte) {
@@ -1356,11 +1392,6 @@ impl Cpu {
     fn execute_ld_word(&mut self, source: AddressingModeWord, destination: AddressingModeWord) {
         let value = self.read_word(source);
         self.write_word(value, destination);
-    }
-
-    fn execute_ldh(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
-        let value = self.read_byte(source);
-        self.write_byte(value, destination);
     }
 
     fn execute_ldhl(&mut self, source: AddressingModeWord, offset: i8) {
@@ -1460,7 +1491,12 @@ impl Cpu {
         let new_accumulator = (old_accumulator << 1) | (self.get_carry_flag() as u8);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
 
-        self.set_zero_flag(new_accumulator == 0);
+        // The manual states that the zero flag is set when the result is zero, but
+        // other documentation states that the zero flag is unconditionally reset.
+        //
+        // The zero flag being unconditionally reset passes blargg's cpu tests
+        // (whereas conditionally setting the zero flag fails).
+        self.set_zero_flag(false);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
@@ -1482,7 +1518,12 @@ impl Cpu {
         let new_accumulator = old_accumulator.rotate_left(1);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
 
-        self.set_zero_flag(new_accumulator == 0);
+        // The manual states that the zero flag is set when the result is zero, but
+        // other documentation states that the zero flag is unconditionally reset.
+        //
+        // The zero flag being unconditionally reset passes blargg's cpu tests
+        // (whereas conditionally setting the zero flag fails).
+        self.set_zero_flag(false);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
@@ -1505,7 +1546,12 @@ impl Cpu {
             (old_accumulator >> 1) | (self.get_carry_flag() as u8).rotate_right(1);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
 
-        self.set_zero_flag(new_accumulator == 0);
+        // The manual states that the zero flag is set when the result is zero, but
+        // other documentation states that the zero flag is unconditionally reset.
+        //
+        // The zero flag being unconditionally reset passes blargg's cpu tests
+        // (whereas conditionally setting the zero flag fails).
+        self.set_zero_flag(false);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
@@ -1527,7 +1573,12 @@ impl Cpu {
         let new_accumulator = old_accumulator.rotate_right(1);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
 
-        self.set_zero_flag(new_accumulator == 0);
+        // The manual states that the zero flag is set when the result is zero, but
+        // other documentation states that the zero flag is unconditionally reset.
+        //
+        // The zero flag being unconditionally reset passes blargg's cpu tests
+        // (whereas conditionally setting the zero flag fails).
+        self.set_zero_flag(false);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
@@ -1568,6 +1619,12 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag(half_carry);
         self.set_carry_flag(carry);
+    }
+
+    fn execute_scf(&mut self) {
+        self.set_subtract_flag(false);
+        self.set_half_carry_flag(false);
+        self.set_carry_flag(true);
     }
 
     fn execute_set(&mut self, target: AddressingModeByte, bit: u8) {
