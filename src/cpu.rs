@@ -199,6 +199,7 @@ pub enum AddressingModeByte {
     E,
     H,
     L,
+    CIndirect,
     BcIndirect,
     DeIndirect,
     HlIndirect,
@@ -218,6 +219,7 @@ impl AddressingModeByte {
             AddressingModeByte::E => false,
             AddressingModeByte::H => false,
             AddressingModeByte::L => false,
+            AddressingModeByte::CIndirect => true,
             AddressingModeByte::BcIndirect => true,
             AddressingModeByte::DeIndirect => true,
             AddressingModeByte::HlIndirect => true,
@@ -311,6 +313,10 @@ impl Cpu {
             AddressingModeByte::E => self.de as u8,
             AddressingModeByte::H => (self.hl >> 8) as u8,
             AddressingModeByte::L => self.hl as u8,
+            AddressingModeByte::CIndirect => {
+                let address = 0xFF00 + u16::from(self.read_byte(AddressingModeByte::C));
+                self.read_byte_address(address)
+            }
             AddressingModeByte::BcIndirect => self.read_byte_address(self.bc),
             AddressingModeByte::DeIndirect => self.read_byte_address(self.de),
             AddressingModeByte::HlIndirect => self.read_byte_address(self.hl),
@@ -387,6 +393,10 @@ impl Cpu {
                 self.hl &= !0x00FF;
                 self.hl |= u16::from(val)
             }
+            AddressingModeByte::CIndirect => {
+                let address = 0xFF00 + u16::from(self.read_byte(AddressingModeByte::C));
+                self.write_byte_address(val, address);
+            }
             AddressingModeByte::BcIndirect => self.write_byte_address(val, self.bc),
             AddressingModeByte::DeIndirect => self.write_byte_address(val, self.de),
             AddressingModeByte::HlIndirect => self.write_byte_address(val, self.hl),
@@ -403,9 +413,11 @@ impl Cpu {
         }
     }
 
+    // Bottom byte of Af (bottom byte of flags register) is always masked as 0,
+    // even if we try to write a non-zero value to it.
     fn write_word(&mut self, val: u16, location: AddressingModeWord) {
         match location {
-            AddressingModeWord::Af => self.af = val,
+            AddressingModeWord::Af => self.af = val & 0xFFF0,
             AddressingModeWord::Bc => self.bc = val,
             AddressingModeWord::De => self.de = val,
             AddressingModeWord::Hl => self.hl = val,
@@ -988,11 +1000,33 @@ impl Cpu {
 
                 self.pc += 2;
                 Instruction {
-                    instruction_type: InstructionType::Ldh {
+                    instruction_type: InstructionType::LdByte {
                         source,
                         destination,
                     },
                     cycles: 12,
+                }
+            }
+            0xE2 | 0xF2 => {
+                let (source, destination) = match opcode {
+                    0xE2 => (
+                        AddressingModeByte::Accumulator,
+                        AddressingModeByte::CIndirect,
+                    ),
+                    0xF2 => (
+                        AddressingModeByte::CIndirect,
+                        AddressingModeByte::Accumulator,
+                    ),
+                    _ => unreachable!(),
+                };
+
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::LdByte {
+                        source,
+                        destination,
+                    },
+                    cycles: 8,
                 }
             }
             0xE8 => {
