@@ -121,6 +121,7 @@ pub enum InstructionType {
         taken_penalty: u16,
         condition: BranchConditionType,
     },
+    Reti,
     Rl {
         target: AddressingModeByte,
     },
@@ -137,6 +138,9 @@ pub enum InstructionType {
         target: AddressingModeByte,
     },
     Rrca,
+    Rst {
+        offset: u16,
+    },
     Sbc {
         source: AddressingModeByte,
         destination: AddressingModeByte,
@@ -850,6 +854,17 @@ impl Cpu {
                     cycles: 16,
                 }
             }
+            0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
+                let offset = opcode & 0b00111000;
+
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Rst {
+                        offset: u16::from(offset),
+                    },
+                    cycles: 16,
+                }
+            }
             0xC9 => {
                 self.pc += 1;
                 Instruction {
@@ -947,6 +962,13 @@ impl Cpu {
                 Instruction {
                     instruction_type,
                     cycles: 8,
+                }
+            }
+            0xD9 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Reti,
+                    cycles: 16,
                 }
             }
             0xE0 | 0xF0 => {
@@ -1118,6 +1140,7 @@ impl Cpu {
                 taken_penalty,
                 condition,
             } => self.execute_ret(condition),
+            InstructionType::Reti => self.execute_reti(),
             InstructionType::Rl { target } => self.execute_rl(target),
             InstructionType::Rla => self.execute_rla(),
             InstructionType::Rlc { target } => self.execute_rlc(target),
@@ -1126,6 +1149,7 @@ impl Cpu {
             InstructionType::Rra => self.execute_rra(),
             InstructionType::Rrc { target } => self.execute_rrc(target),
             InstructionType::Rrca => self.execute_rrca(),
+            InstructionType::Rst { offset } => self.execute_rst(offset),
             InstructionType::Sbc {
                 source,
                 destination,
@@ -1380,6 +1404,12 @@ impl Cpu {
         }
     }
 
+    fn execute_reti(&mut self) {
+        let return_address = self.read_word_address(self.sp);
+        self.sp += 2;
+        self.pc = return_address;
+    }
+
     fn execute_rl(&mut self, target: AddressingModeByte) {
         let old_value = self.read_byte(target);
         let new_value = (old_value << 1) | (self.get_carry_flag() as u8);
@@ -1467,6 +1497,14 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
+    }
+
+    fn execute_rst(&mut self, offset: u16) {
+        self.sp -= 2;
+        self.write_word_address(self.pc, self.sp);
+        self.pc = offset;
+
+        // TODO: re-enable interrupts
     }
 
     // Some gameboy documentation has carry/half-carry documentation backwards for this op.
