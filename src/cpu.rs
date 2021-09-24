@@ -64,6 +64,7 @@ pub enum InstructionType {
         source: AddressingModeByte,
     },
     Cpl,
+    Daa,
     DecByte {
         target: AddressingModeByte,
     },
@@ -672,6 +673,13 @@ impl Cpu {
                     cycles: 8,
                 }
             }
+            0x27 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Daa,
+                    cycles: 4,
+                }
+            }
             0x2F => {
                 self.pc += 1;
                 Instruction {
@@ -1158,6 +1166,7 @@ impl Cpu {
             InstructionType::Ccf => self.execute_ccf(),
             InstructionType::Cp { source } => self.execute_cp(source),
             InstructionType::Cpl => self.execute_cpl(),
+            InstructionType::Daa => self.execute_daa(),
             InstructionType::DecByte { target } => self.execute_dec_byte(target),
             InstructionType::DecWord { target } => self.execute_dec_word(target),
             InstructionType::Di => self.interrupt_master_enable = false,
@@ -1368,6 +1377,36 @@ impl Cpu {
 
         self.set_subtract_flag(true);
         self.set_half_carry_flag(true);
+    }
+
+    fn execute_daa(&mut self) {
+        let source_value = self.read_byte(AddressingModeByte::Accumulator);
+        let mut result_value = source_value;
+
+        if self.get_subtract_flag() {
+            if self.get_carry_flag() {
+                result_value = result_value.wrapping_sub(0x60);
+            }
+
+            if self.get_half_carry_flag() {
+                result_value = result_value.wrapping_sub(0x06);
+            }
+        } else {
+            if self.get_carry_flag() || (source_value > 0x99) {
+                result_value = result_value.wrapping_add(0x60);
+                self.set_carry_flag(true);
+            }
+
+            if self.get_half_carry_flag() || ((source_value & 0x0F) > 0x09) {
+                result_value = result_value.wrapping_add(0x06);
+            }
+        }
+
+        self.write_byte(result_value, AddressingModeByte::Accumulator);
+
+        self.set_zero_flag(result_value == 0);
+        self.set_half_carry_flag(false);
+        // carry flag already (possibly) set above
     }
 
     fn execute_dec_byte(&mut self, target: AddressingModeByte) {
