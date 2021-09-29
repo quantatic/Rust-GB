@@ -1,14 +1,17 @@
+use crate::mmu::{InterruptType, Mmu};
+
 use std::fmt::Debug;
 
 pub struct Cpu {
-    pub af: u16,
-    pub bc: u16,
-    pub de: u16,
-    pub hl: u16,
-    pub sp: u16,
-    pub pc: u16,
-    pub interrupt_master_enable: bool,
-    pub memory: [u8; 0x10000],
+    af: u16,
+    bc: u16,
+    de: u16,
+    hl: u16,
+    sp: u16,
+    pc: u16,
+    pub mmu: Mmu,
+    cycles_delay: u8,
+    halted: bool,
 }
 
 impl Debug for Cpu {
@@ -20,7 +23,8 @@ impl Debug for Cpu {
             .field("hl", &self.hl)
             .field("sp", &self.sp)
             .field("pc", &self.pc)
-            .field("interrupt_master_enable", &self.interrupt_master_enable)
+            .field("cycles_delay", &self.cycles_delay)
+            .field("halted", &self.halted)
             .finish_non_exhaustive()
     }
 }
@@ -28,7 +32,7 @@ impl Debug for Cpu {
 #[derive(Clone, Copy, Debug)]
 pub struct Instruction {
     pub instruction_type: InstructionType,
-    pub cycles: u16,
+    pub cycles: u8,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -244,40 +248,6 @@ pub enum AddressingModeWord {
 
 impl Default for Cpu {
     fn default() -> Self {
-        let mut memory = [0; 0x10000];
-        memory[0xFF05] = 0x00;
-        memory[0xFF05] = 0x00;
-        memory[0xFF06] = 0x00;
-        memory[0xFF07] = 0x00;
-        memory[0xFF10] = 0x80;
-        memory[0xFF11] = 0xBF;
-        memory[0xFF12] = 0xF3;
-        memory[0xFF14] = 0xBF;
-        memory[0xFF16] = 0x3F;
-        memory[0xFF17] = 0x00;
-        memory[0xFF19] = 0xBF;
-        memory[0xFF1A] = 0x7F;
-        memory[0xFF1B] = 0xFF;
-        memory[0xFF1C] = 0x9F;
-        memory[0xFF1E] = 0xBF;
-        memory[0xFF20] = 0xFF;
-        memory[0xFF21] = 0x00;
-        memory[0xFF22] = 0x00;
-        memory[0xFF23] = 0xBF;
-        memory[0xFF24] = 0x77;
-        memory[0xFF25] = 0xF3;
-        memory[0xFF26] = 0xF1;
-        memory[0xFF40] = 0x91;
-        memory[0xFF42] = 0x00;
-        memory[0xFF43] = 0x00;
-        memory[0xFF45] = 0x00;
-        memory[0xFF47] = 0xFC;
-        memory[0xFF48] = 0xFF;
-        memory[0xFF49] = 0xFF;
-        memory[0xFF4A] = 0x00;
-        memory[0xFF4B] = 0x00;
-        memory[0xFFFF] = 0x00;
-
         Self {
             af: 0x01B0,
             bc: 0x0013,
@@ -285,23 +255,40 @@ impl Default for Cpu {
             hl: 0x014D,
             sp: 0xFFFE,
             pc: 0x100,
-            interrupt_master_enable: false,
-            memory,
+            mmu: Default::default(),
+            cycles_delay: Default::default(),
+            halted: Default::default(),
         }
     }
 }
 
 impl Cpu {
-    fn read_byte_address(&self, address: u16) -> u8 {
-        let result = self.memory[usize::from(address)];
-        // println!("memory[{:#X}] -> {:#X}", address, result);
-        result
-    }
+    pub fn step(&mut self) {
+        // If currently halted, check to see if ongoing halt is finished. If not, bail.
+        if self.halted {
+            if self.mmu.halt_finished() {
+                self.halted = false;
+            } else {
+                return;
+            }
+        }
 
-    fn read_word_address(&self, address: u16) -> u16 {
-        let low = self.read_byte_address(address);
-        let high = self.read_byte_address(address + 1);
-        u16::from(low) | (u16::from(high) << 8)
+        if self.cycles_delay == 0 {
+            if let Some(interrupt_type) = self.mmu.poll_interrupt() {
+                self.handle_interrupt(interrupt_type);
+                // println!("Handled interrupt: {:?}", interrupt_type);
+                self.cycles_delay = 20;
+            } else {
+                let decoded = self.decode();
+                // println!("{:#x?}", decoded);
+                self.execute(decoded);
+                // println!("{:#x?}", self);
+                // println!("----------------");
+                self.cycles_delay = decoded.cycles;
+            }
+        }
+
+        self.cycles_delay -= 1;
     }
 
     fn read_byte(&mut self, location: AddressingModeByte) -> u8 {
@@ -315,23 +302,23 @@ impl Cpu {
             AddressingModeByte::L => self.hl as u8,
             AddressingModeByte::CIndirect => {
                 let address = 0xFF00 + u16::from(self.read_byte(AddressingModeByte::C));
-                self.read_byte_address(address)
+                self.mmu.read_byte_address(address)
             }
-            AddressingModeByte::BcIndirect => self.read_byte_address(self.bc),
-            AddressingModeByte::DeIndirect => self.read_byte_address(self.de),
-            AddressingModeByte::HlIndirect => self.read_byte_address(self.hl),
+            AddressingModeByte::BcIndirect => self.mmu.read_byte_address(self.bc),
+            AddressingModeByte::DeIndirect => self.mmu.read_byte_address(self.de),
+            AddressingModeByte::HlIndirect => self.mmu.read_byte_address(self.hl),
             AddressingModeByte::HlIndirectIncrement => {
-                let result = self.read_byte_address(self.hl);
+                let result = self.mmu.read_byte_address(self.hl);
                 self.hl = self.hl.wrapping_add(1);
                 result
             }
             AddressingModeByte::HlIndirectDecrement => {
-                let result = self.read_byte_address(self.hl);
+                let result = self.mmu.read_byte_address(self.hl);
                 self.hl = self.hl.wrapping_sub(1);
                 result
             }
             AddressingModeByte::Literal(val) => val,
-            AddressingModeByte::LiteralIndirect(address) => self.read_byte_address(address),
+            AddressingModeByte::LiteralIndirect(address) => self.mmu.read_byte_address(address),
         }
     }
 
@@ -343,24 +330,8 @@ impl Cpu {
             AddressingModeWord::Hl => self.hl,
             AddressingModeWord::Sp => self.sp,
             AddressingModeWord::Literal(val) => val,
-            AddressingModeWord::LiteralIndirect(address) => self.read_word_address(address),
+            AddressingModeWord::LiteralIndirect(address) => self.mmu.read_word_address(address),
         }
-    }
-
-    fn write_byte_address(&mut self, value: u8, address: u16) {
-        if address == 0xFF01 {
-            print!("{}", char::from(value));
-        }
-
-        self.memory[usize::from(address)] = value;
-        // println!("{:#X} -> memory[{:#X}]", value, address);
-    }
-
-    fn write_word_address(&mut self, value: u16, address: u16) {
-        let low = value & 0x00FF;
-        let high = value >> 8;
-        self.write_byte_address(low as u8, address);
-        self.write_byte_address(high as u8, address + 1);
     }
 
     fn write_byte(&mut self, val: u8, location: AddressingModeByte) {
@@ -395,21 +366,23 @@ impl Cpu {
             }
             AddressingModeByte::CIndirect => {
                 let address = 0xFF00 + u16::from(self.read_byte(AddressingModeByte::C));
-                self.write_byte_address(val, address);
+                self.mmu.write_byte_address(val, address);
             }
-            AddressingModeByte::BcIndirect => self.write_byte_address(val, self.bc),
-            AddressingModeByte::DeIndirect => self.write_byte_address(val, self.de),
-            AddressingModeByte::HlIndirect => self.write_byte_address(val, self.hl),
+            AddressingModeByte::BcIndirect => self.mmu.write_byte_address(val, self.bc),
+            AddressingModeByte::DeIndirect => self.mmu.write_byte_address(val, self.de),
+            AddressingModeByte::HlIndirect => self.mmu.write_byte_address(val, self.hl),
             AddressingModeByte::HlIndirectIncrement => {
-                self.write_byte_address(val, self.hl);
+                self.mmu.write_byte_address(val, self.hl);
                 self.hl = self.hl.wrapping_add(1)
             }
             AddressingModeByte::HlIndirectDecrement => {
-                self.write_byte_address(val, self.hl);
+                self.mmu.write_byte_address(val, self.hl);
                 self.hl = self.hl.wrapping_sub(1)
             }
             AddressingModeByte::Literal(_) => unreachable!(),
-            AddressingModeByte::LiteralIndirect(address) => self.write_byte_address(val, address),
+            AddressingModeByte::LiteralIndirect(address) => {
+                self.mmu.write_byte_address(val, address)
+            }
         }
     }
 
@@ -423,12 +396,14 @@ impl Cpu {
             AddressingModeWord::Hl => self.hl = val,
             AddressingModeWord::Sp => self.sp = val,
             AddressingModeWord::Literal(_) => unreachable!(),
-            AddressingModeWord::LiteralIndirect(address) => self.write_word_address(val, address),
+            AddressingModeWord::LiteralIndirect(address) => {
+                self.mmu.write_word_address(val, address)
+            }
         }
     }
 
-    pub fn decode(&mut self) -> Instruction {
-        let opcode = self.read_byte_address(self.pc);
+    fn decode(&mut self) -> Instruction {
+        let opcode = self.mmu.read_byte_address(self.pc);
         match opcode {
             0x00 => {
                 self.pc += 1;
@@ -438,7 +413,7 @@ impl Cpu {
                 }
             }
             0x01 | 0x11 | 0x21 | 0x31 => {
-                let source = AddressingModeWord::Literal(self.read_word_address(self.pc + 1));
+                let source = AddressingModeWord::Literal(self.mmu.read_word_address(self.pc + 1));
                 let destination = match (opcode & 0b00110000) >> 4 {
                     0b00 => AddressingModeWord::Bc,
                     0b01 => AddressingModeWord::De,
@@ -544,7 +519,7 @@ impl Cpu {
                     }
                 }
                 let r = get_addressing_mode((opcode & 0b00111000) >> 3);
-                let n = self.read_byte_address(self.pc + 1);
+                let n = self.mmu.read_byte_address(self.pc + 1);
                 let cycles = if r.is_indirect() { 12 } else { 8 };
 
                 self.pc += 2;
@@ -564,7 +539,7 @@ impl Cpu {
                 }
             }
             0x08 => {
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
 
                 self.pc += 3;
                 Instruction {
@@ -628,7 +603,7 @@ impl Cpu {
                 }
             }
             0x18 => {
-                let offset = self.read_byte_address(self.pc + 1) as i8;
+                let offset = self.mmu.read_byte_address(self.pc + 1) as i8;
                 self.pc += 2;
                 Instruction {
                     instruction_type: InstructionType::Jr {
@@ -660,7 +635,7 @@ impl Cpu {
                 let condition = get_branch_condition_type((opcode & 0b00111000) >> 3);
 
                 // Numbers are stored as 2's complement, so we can simply cast to i8 for desired offset.
-                let offset = self.read_byte_address(self.pc + 1) as i8;
+                let offset = self.mmu.read_byte_address(self.pc + 1) as i8;
 
                 self.pc += 2;
 
@@ -738,10 +713,13 @@ impl Cpu {
                     cycles,
                 }
             }
-            0x76 => Instruction {
-                instruction_type: InstructionType::Halt,
-                cycles: 4,
-            },
+            0x76 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Halt,
+                    cycles: 4,
+                }
+            }
             0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8A | 0x8B
             | 0x8C | 0x8D | 0x8E | 0x8F | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97
             | 0x98 | 0x99 | 0x9A | 0x9B | 0x9C | 0x9D | 0x9E | 0x9F | 0xA0 | 0xA1 | 0xA2 | 0xA3
@@ -834,7 +812,7 @@ impl Cpu {
                 }
 
                 let condition = get_branch_condition_type((opcode & 0b00111000) >> 3);
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
 
                 self.pc += 3;
                 Instruction {
@@ -847,7 +825,7 @@ impl Cpu {
                 }
             }
             0xC3 => {
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
                 self.pc += 3;
 
                 Instruction {
@@ -860,7 +838,7 @@ impl Cpu {
                 }
             }
             0xC4 | 0xCC | 0xD4 | 0xDC => {
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
                 let condition = match opcode {
                     0xC4 => BranchConditionType::NotZero,
                     0xCC => BranchConditionType::Zero,
@@ -916,7 +894,7 @@ impl Cpu {
                 }
             }
             0xCB => {
-                let cb_postfix = self.read_byte_address(self.pc + 1);
+                let cb_postfix = self.mmu.read_byte_address(self.pc + 1);
                 let target = match cb_postfix & 0b00000111 {
                     0b000 => AddressingModeByte::B,
                     0b001 => AddressingModeByte::C,
@@ -962,7 +940,7 @@ impl Cpu {
                 }
             }
             0xCD => {
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
 
                 self.pc += 3;
                 Instruction {
@@ -975,7 +953,7 @@ impl Cpu {
                 }
             }
             0xC6 | 0xCE | 0xD6 | 0xDE | 0xE6 | 0xEE | 0xF6 | 0xFE => {
-                let source = AddressingModeByte::Literal(self.read_byte_address(self.pc + 1));
+                let source = AddressingModeByte::Literal(self.mmu.read_byte_address(self.pc + 1));
 
                 let instruction_type = match (opcode & 0b00111000) >> 3 {
                     0b000 => InstructionType::AddByte {
@@ -1012,7 +990,7 @@ impl Cpu {
                 }
             }
             0xE0 | 0xF0 => {
-                let offset = self.read_byte_address(self.pc + 1);
+                let offset = self.mmu.read_byte_address(self.pc + 1);
                 let address = 0xFF00 + u16::from(offset);
                 let (source, destination) = match opcode {
                     0xE0 => (
@@ -1058,7 +1036,7 @@ impl Cpu {
                 }
             }
             0xE8 => {
-                let source_value = self.read_byte_address(self.pc + 1);
+                let source_value = self.mmu.read_byte_address(self.pc + 1);
 
                 self.pc += 2;
                 Instruction {
@@ -1080,7 +1058,7 @@ impl Cpu {
                 }
             }
             0xEA | 0xFA => {
-                let address = self.read_word_address(self.pc + 1);
+                let address = self.mmu.read_word_address(self.pc + 1);
 
                 let (source, destination) = match opcode {
                     0xEA => (
@@ -1111,7 +1089,7 @@ impl Cpu {
                 }
             }
             0xF8 => {
-                let offset = self.read_byte_address(self.pc + 1);
+                let offset = self.mmu.read_byte_address(self.pc + 1);
 
                 self.pc += 2;
                 Instruction {
@@ -1144,7 +1122,7 @@ impl Cpu {
         }
     }
 
-    pub fn execute(&mut self, instruction: Instruction) {
+    fn execute(&mut self, instruction: Instruction) {
         match instruction.instruction_type {
             InstructionType::AddByte {
                 source,
@@ -1169,8 +1147,9 @@ impl Cpu {
             InstructionType::Daa => self.execute_daa(),
             InstructionType::DecByte { target } => self.execute_dec_byte(target),
             InstructionType::DecWord { target } => self.execute_dec_word(target),
-            InstructionType::Di => self.interrupt_master_enable = false,
-            InstructionType::Ei => self.interrupt_master_enable = true,
+            InstructionType::Di => self.mmu.set_interrupt_master_enable(false),
+            InstructionType::Ei => self.mmu.set_interrupt_master_enable(true),
+            InstructionType::Halt => self.halted = true,
             InstructionType::IncByte { target } => self.execute_inc_byte(target),
             InstructionType::IncWord { target } => self.execute_inc_word(target),
             InstructionType::Jp {
@@ -1227,6 +1206,20 @@ impl Cpu {
         };
     }
 
+    fn handle_interrupt(&mut self, interrupt_type: InterruptType) {
+        self.sp -= 2;
+        self.mmu.write_word_address(self.pc, self.sp);
+        self.pc = match interrupt_type {
+            InterruptType::VBlank => 0x40,
+            InterruptType::LcdStat => 0x48,
+            InterruptType::Timer => 0x50,
+            InterruptType::Serial => 0x58,
+            InterruptType::Joypad => 0x60,
+        };
+    }
+}
+
+impl Cpu {
     fn execute_add_byte(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(destination);
@@ -1331,7 +1324,7 @@ impl Cpu {
     fn execute_call(&mut self, address: u16, condition: BranchConditionType) {
         if self.should_branch(condition) {
             self.sp -= 2;
-            self.write_word_address(self.pc, self.sp);
+            self.mmu.write_word_address(self.pc, self.sp);
             self.pc = address;
         }
     }
@@ -1485,7 +1478,7 @@ impl Cpu {
     }
 
     fn execute_pop(&mut self, target: AddressingModeWord) {
-        let value = self.read_word_address(self.sp);
+        let value = self.mmu.read_word_address(self.sp);
         self.sp += 2;
         self.write_word(value, target);
     }
@@ -1493,7 +1486,7 @@ impl Cpu {
     fn execute_push(&mut self, source: AddressingModeWord) {
         let value = self.read_word(source);
         self.sp -= 2;
-        self.write_word_address(value, self.sp);
+        self.mmu.write_word_address(value, self.sp);
     }
 
     fn execute_res(&mut self, target: AddressingModeByte, bit: u8) {
@@ -1504,16 +1497,17 @@ impl Cpu {
 
     fn execute_ret(&mut self, condition: BranchConditionType) {
         if self.should_branch(condition) {
-            let return_address = self.read_word_address(self.sp);
+            let return_address = self.mmu.read_word_address(self.sp);
             self.sp += 2;
             self.pc = return_address;
         }
     }
 
     fn execute_reti(&mut self) {
-        let return_address = self.read_word_address(self.sp);
+        let return_address = self.mmu.read_word_address(self.sp);
         self.sp += 2;
         self.pc = return_address;
+        self.mmu.set_interrupt_master_enable(true);
     }
 
     fn execute_rl(&mut self, target: AddressingModeByte) {
@@ -1627,7 +1621,7 @@ impl Cpu {
 
     fn execute_rst(&mut self, offset: u16) {
         self.sp -= 2;
-        self.write_word_address(self.pc, self.sp);
+        self.mmu.write_word_address(self.pc, self.sp);
         self.pc = offset;
 
         // TODO: re-enable interrupts
