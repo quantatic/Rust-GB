@@ -1,4 +1,4 @@
-use crate::timer::Timer;
+use crate::{serial::Serial, timer::Timer};
 
 #[derive(Clone, Copy, Debug)]
 pub enum InterruptType {
@@ -18,6 +18,7 @@ pub struct Mmu {
     high_ram: [u8; 0x7F],
     video_ram: [u8; 0x2000],
     pub timer: Timer,
+    pub serial: Serial,
 }
 
 impl Default for Mmu {
@@ -64,6 +65,7 @@ impl Default for Mmu {
             high_ram: [0; 127],
             video_ram: [0; 8192],
             timer: Default::default(),
+            serial: Default::default(),
         }
     }
 }
@@ -102,10 +104,6 @@ impl Mmu {
     }
 
     pub fn write_byte_address(&mut self, value: u8, address: u16) {
-        if address == 0xFF01 {
-            print!("{}", char::from(value));
-        }
-
         match address {
             0x0000..=0x3FFF => self.memory[usize::from(address)] = value,
             0x4000..=0x7FFF => self.memory[usize::from(address)] = value,
@@ -117,7 +115,7 @@ impl Mmu {
                 let ram_offset = address - 0xC000;
                 self.low_ram[usize::from(ram_offset)] = value;
             }
-            0xFF01 => eprintln!("writing 0x{:02X} to unimplemented SB", value),
+            0xFF01 => self.serial.write_byte(value),
             0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
             0xFF04 => self.timer.set_divider_register(value),
             0xFF05 => self.timer.set_timer_counter(value),
