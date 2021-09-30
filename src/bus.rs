@@ -9,11 +9,11 @@ pub enum InterruptType {
     Joypad,
 }
 
-pub struct Mmu {
+pub struct Bus {
     interrupt_enable: u8,
     interrupt_flag: u8,
     interrupt_master_enable: bool,
-    pub memory: [u8; 0x10000],
+    memory: [u8; 0x8000],
     low_ram: [u8; 0x2000],
     high_ram: [u8; 0x7F],
     video_ram: [u8; 0x2000],
@@ -21,7 +21,7 @@ pub struct Mmu {
     pub serial: Serial,
 }
 
-impl Default for Mmu {
+impl Default for Bus {
     fn default() -> Self {
         let mut memory = [0; 0x10000];
         memory[0xFF05] = 0x00;
@@ -60,17 +60,24 @@ impl Default for Mmu {
             interrupt_enable: Default::default(),
             interrupt_flag: Default::default(),
             interrupt_master_enable: Default::default(),
-            memory,
-            low_ram: [0; 8192],
-            high_ram: [0; 127],
-            video_ram: [0; 8192],
+            memory: [0; 0x8000],
+            low_ram: [0; 0x2000],
+            high_ram: [0; 0x7F],
+            video_ram: [0; 0x2000],
             timer: Default::default(),
             serial: Default::default(),
         }
     }
 }
 
-impl Mmu {
+impl Bus {
+    pub fn initialize_memory(&mut self, data: &[u8]) {
+        assert!(data.len() <= self.memory.len());
+        for i in 0..data.len() {
+            self.memory[i] = data[i];
+        }
+    }
+
     pub fn read_byte_address(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x3FFF => self.memory[usize::from(address)],
@@ -83,9 +90,17 @@ impl Mmu {
                 let ram_offset = address - 0xC000;
                 self.low_ram[usize::from(ram_offset)]
             }
+            0xFF00 => {
+                eprintln!("reading from unimplemented P1");
+                0
+            }
             0xFF0F => self.interrupt_flag,
             0xFF44 => {
                 eprintln!("reading from unimplemented LY");
+                0
+            }
+            0xFF4D => {
+                eprintln!("reading from unimplemented KEY1");
                 0
             }
             0xFF80..=0xFFFE => {
@@ -115,6 +130,7 @@ impl Mmu {
                 let ram_offset = address - 0xC000;
                 self.low_ram[usize::from(ram_offset)] = value;
             }
+            0xFF00 => eprintln!("writing 0x{:02X} to unimplemented P1", value),
             0xFF01 => self.serial.write_byte(value),
             0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
             0xFF04 => self.timer.set_divider_register(value),
@@ -130,6 +146,7 @@ impl Mmu {
             0xFF43 => eprintln!("writing 0x{:02X} to unimplemented SCX", value),
             0xFF44 => eprintln!("writing 0x{:02X} to unimplemented LY", value),
             0xFF47 => eprintln!("writing 0x{:02X} to unimplemented BGP", value),
+            0xFF4D => eprintln!("writing 0x{:02X} to unimplemented KEY1", value),
             0xFF80..=0xFFFE => {
                 let ram_offset = address - 0xFF80;
                 self.high_ram[usize::from(ram_offset)] = value;
@@ -147,7 +164,7 @@ impl Mmu {
     }
 }
 
-impl Mmu {
+impl Bus {
     const VBLANK_INTERRUPT_MASK: u8 = 0b0000_0001;
     const LCD_STAT_INTERRUPT_MASK: u8 = 0b000_00010;
     const TIMER_INTERRUPT_MASK: u8 = 0b0000_0100;

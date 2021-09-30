@@ -1,11 +1,21 @@
 mod cpu;
-mod mmu;
+mod bus;
 mod serial;
 mod timer;
 
 use cpu::Cpu;
 
-fn main() {}
+const ROM: &[u8] = include_bytes!("../tetris.gb");
+
+fn main() {
+    let mut cpu = Cpu::default();
+    cpu.bus.initialize_memory(ROM);
+
+    loop {
+        cpu.step();
+        cpu.bus.timer.step();
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -13,15 +23,20 @@ mod tests {
 
     fn test_rom_passed(rom: &[u8]) {
         let mut cpu = Cpu::default();
-        cpu.mmu.memory[..rom.len()].copy_from_slice(rom);
+        cpu.bus.initialize_memory(rom);
 
         for _ in 0..100_000_000 {
             cpu.step();
-            cpu.mmu.timer.step();
+            cpu.bus.timer.step();
         }
 
-        let serial_out = cpu.mmu.serial.get_data_written();
+        let serial_out = cpu.bus.serial.get_data_written();
         assert!(serial_out.contains("Passed"));
+    }
+
+    #[test]
+    fn test_01_special() {
+        test_rom_passed(include_bytes!("../01_special.gb"));
     }
 
     #[test]
