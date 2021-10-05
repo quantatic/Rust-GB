@@ -1,20 +1,62 @@
-mod cpu;
 mod bus;
+mod cartridge;
+mod cpu;
+mod ppu;
 mod serial;
 mod timer;
 
 use cpu::Cpu;
+use ppu::PaletteColor;
+
+use std::error::Error;
+
+use crate::{bus::Bus, cartridge::Cartridge};
 
 const ROM: &[u8] = include_bytes!("../tetris.gb");
+const RENDER: bool = true;
 
-fn main() {
-    let mut cpu = Cpu::default();
-    cpu.bus.initialize_memory(ROM);
+fn main() -> Result<(), Box<dyn Error>> {
+    println!("cpu size: {}", std::mem::size_of::<Cpu>());
+    let cartridge = Cartridge::new(ROM)?;
+    let mut cpu = Cpu::new(cartridge);
 
+    let mut i = 0;
+    let mut tick = 0;
     loop {
-        cpu.step();
-        cpu.bus.timer.step();
+        //cpu.step(tick > 206_405_000);
+        cpu.step(false);
+
+        if RENDER
+            && cpu.bus.ppu.should_print()
+            && cpu.bus.ppu.get_buffer().iter().any(|line| {
+                line.iter()
+                    .any(|pixel| !matches!(pixel, PaletteColor::White))
+            })
+        {
+            if i % 50 == 0 {
+                print!("\x1Bc"); // clear screen
+                for line in cpu.bus.ppu.get_buffer() {
+                    for pixel in line {
+                        let pixel_data = match pixel {
+                            PaletteColor::White => ' ',
+                            PaletteColor::LightGray => '-',
+                            PaletteColor::DarkGray => '+',
+                            PaletteColor::Black => '@',
+                        };
+                        print!("{}", pixel_data);
+                    }
+                    println!();
+                }
+            }
+
+            i += 1;
+        }
+
+        tick += 1;
     }
+
+    println!("{}", cpu.bus.serial.get_data_written());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -22,12 +64,11 @@ mod tests {
     use super::*;
 
     fn test_rom_passed(rom: &[u8]) {
-        let mut cpu = Cpu::default();
-        cpu.bus.initialize_memory(rom);
+        let cartridge = Cartridge::new(rom).unwrap();
+        let mut cpu = Cpu::new(cartridge);
 
         for _ in 0..100_000_000 {
-            cpu.step();
-            cpu.bus.timer.step();
+            cpu.step(false);
         }
 
         let serial_out = cpu.bus.serial.get_data_written();

@@ -1,6 +1,10 @@
-use crate::bus::{InterruptType, Bus};
-
+use std::error::Error;
 use std::fmt::Debug;
+
+use crate::{
+    bus::{Bus, InterruptType},
+    cartridge::{self, Cartridge},
+};
 
 pub struct Cpu {
     af: u16,
@@ -246,8 +250,8 @@ pub enum AddressingModeWord {
     LiteralIndirect(u16),
 }
 
-impl Default for Cpu {
-    fn default() -> Self {
+impl Cpu {
+    pub fn new(cartridge: Cartridge) -> Self {
         Self {
             af: 0x01B0,
             bc: 0x0013,
@@ -255,7 +259,7 @@ impl Default for Cpu {
             hl: 0x014D,
             sp: 0xFFFE,
             pc: 0x100,
-            bus: Default::default(),
+            bus: Bus::new(cartridge),
             cycles_delay: Default::default(),
             halted: Default::default(),
         }
@@ -263,7 +267,9 @@ impl Default for Cpu {
 }
 
 impl Cpu {
-    pub fn step(&mut self) {
+    pub fn step(&mut self, log: bool) {
+        self.bus.step();
+
         // If currently halted, check to see if ongoing halt is finished. If not, bail.
         if self.halted {
             if self.bus.halt_finished() {
@@ -276,14 +282,21 @@ impl Cpu {
         if self.cycles_delay == 0 {
             if let Some(interrupt_type) = self.bus.poll_interrupt() {
                 self.handle_interrupt(interrupt_type);
-                // println!("Handled interrupt: {:?}", interrupt_type);
+                eprintln!("Handled interrupt: {:?}", interrupt_type);
                 self.cycles_delay = 20;
             } else {
+                if log {
+                    println!("{:#x?}", self);
+                }
                 let decoded = self.decode();
-                // println!("{:#x?}", decoded);
+                if log {
+                    println!("{:#x?}", decoded);
+                }
                 self.execute(decoded);
-                // println!("{:#x?}", self);
-                // println!("----------------");
+                if log {
+                    println!("{:#x?}", self);
+                    println!("----------------");
+                }
                 self.cycles_delay = decoded.cycles;
             }
         }
