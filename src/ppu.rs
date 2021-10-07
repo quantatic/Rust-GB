@@ -211,9 +211,9 @@ impl Ppu {
                             };
 
                             self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
-                        }
 
-                        break;
+                            break;
+                        }
                     }
                 }
             }

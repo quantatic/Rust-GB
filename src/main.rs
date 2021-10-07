@@ -17,7 +17,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../super_mario_land_world.gb");
+const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
