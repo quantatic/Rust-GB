@@ -1,61 +1,182 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod joypad;
 mod ppu;
 mod serial;
 mod timer;
 
-use cpu::Cpu;
-use ppu::PaletteColor;
+use crate::cartridge::Cartridge;
+use crate::cpu::Cpu;
+use crate::ppu::PaletteColor;
+
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
+use sdl2::rect::Rect;
 
 use std::error::Error;
 
-use crate::{bus::Bus, cartridge::Cartridge};
+const ROM: &[u8] = include_bytes!("../super_mario_land_world.gb");
 
-const ROM: &[u8] = include_bytes!("../tetris.gb");
-const RENDER: bool = true;
+const PPU_WIDTH: u32 = 160;
+const PPU_HEIGHT: u32 = 144;
+const PPU_SCALE: u32 = 4;
+
+const UP_KEYCODE: Keycode = Keycode::Up;
+const DOWN_KEYCODE: Keycode = Keycode::Down;
+const LEFT_KEYCODE: Keycode = Keycode::Left;
+const RIGHT_KEYCODE: Keycode = Keycode::Right;
+
+const START_KEYCODE: Keycode = Keycode::Return;
+const SELECT_KEYCODE: Keycode = Keycode::RShift;
+const A_KEYCODE: Keycode = Keycode::Z;
+const B_KEYCODE: Keycode = Keycode::X;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
     let cartridge = Cartridge::new(ROM)?;
     let mut cpu = Cpu::new(cartridge);
 
-    let mut i = 0;
-    let mut tick = 0;
-    loop {
-        //cpu.step(tick > 206_405_000);
-        cpu.step(false);
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
 
-        if RENDER
-            && cpu.bus.ppu.should_print()
-            && cpu.bus.ppu.get_buffer().iter().any(|line| {
-                line.iter()
-                    .any(|pixel| !matches!(pixel, PaletteColor::White))
-            })
-        {
-            if i % 50 == 0 {
-                print!("\x1Bc"); // clear screen
-                for line in cpu.bus.ppu.get_buffer() {
-                    for pixel in line {
-                        let pixel_data = match pixel {
-                            PaletteColor::White => ' ',
-                            PaletteColor::LightGray => '-',
-                            PaletteColor::DarkGray => '+',
-                            PaletteColor::Black => '@',
-                        };
-                        print!("{}", pixel_data);
-                    }
-                    println!();
+    let window = video_subsystem
+        .window(
+            "Aidan's Big-Brain GB Emulator",
+            PPU_WIDTH * PPU_SCALE,
+            PPU_HEIGHT * PPU_SCALE,
+        )
+        .position_centered()
+        .build()
+        .unwrap();
+
+    let mut canvas = window.into_canvas().build().unwrap();
+
+    canvas.set_draw_color(Color::RGB(0, 255, 255));
+    canvas.clear();
+    canvas.present();
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    loop {
+        cpu.step(false);
+        if cpu.bus.ppu.should_print() {
+            for (y, row) in cpu.bus.ppu.get_buffer().iter().enumerate() {
+                for (x, pixel) in row.iter().cloned().enumerate() {
+                    let color = match pixel {
+                        PaletteColor::White => Color::WHITE,
+                        PaletteColor::LightGray => Color::RGB(170, 170, 170),
+                        PaletteColor::DarkGray => Color::RGB(85, 85, 85),
+                        PaletteColor::Black => Color::BLACK,
+                    };
+                    canvas.set_draw_color(color);
+                    canvas.fill_rect(Rect::new(
+                        (x as i32) * (PPU_SCALE as i32),
+                        (y as i32) * (PPU_SCALE as i32),
+                        PPU_SCALE,
+                        PPU_SCALE,
+                    ))?;
                 }
             }
-
-            i += 1;
+            canvas.present();
         }
-
-        tick += 1;
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => return Ok(()),
+                Event::KeyDown {
+                    keycode: Some(UP_KEYCODE),
+                    repeat: false,
+                    ..
+                } => {
+                    cpu.bus.joypad.set_up_pressed(true);
+                }
+                Event::KeyDown {
+                    keycode: Some(DOWN_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_down_pressed(true),
+                Event::KeyDown {
+                    keycode: Some(LEFT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_left_pressed(true),
+                Event::KeyDown {
+                    keycode: Some(RIGHT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_right_pressed(true),
+                Event::KeyDown {
+                    keycode: Some(SELECT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => {
+                    cpu.bus.joypad.set_select_pressed(true);
+                }
+                Event::KeyDown {
+                    keycode: Some(START_KEYCODE),
+                    repeat: false,
+                    ..
+                } => {
+                    cpu.bus.joypad.set_start_pressed(true);
+                }
+                Event::KeyDown {
+                    keycode: Some(A_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_a_pressed(true),
+                Event::KeyDown {
+                    keycode: Some(B_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_b_pressed(true),
+                Event::KeyUp {
+                    keycode: Some(UP_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_up_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(DOWN_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_down_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(LEFT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_left_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(RIGHT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_right_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(SELECT_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_select_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(START_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_start_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(A_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_a_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(B_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu.bus.joypad.set_b_pressed(false),
+                _ => {}
+            }
+        }
     }
 
-    println!("{}", cpu.bus.serial.get_data_written());
     Ok(())
 }
 

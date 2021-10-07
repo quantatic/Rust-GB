@@ -1,9 +1,8 @@
-use std::error::Error;
 use std::fmt::Debug;
 
 use crate::{
     bus::{Bus, InterruptType},
-    cartridge::{self, Cartridge},
+    cartridge::Cartridge,
 };
 
 pub struct Cpu {

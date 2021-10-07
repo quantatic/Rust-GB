@@ -1,5 +1,6 @@
 use crate::{
     cartridge::{self, Cartridge},
+    joypad::Joypad,
     ppu::Ppu,
     serial::Serial,
     timer::Timer,
@@ -20,11 +21,11 @@ pub struct Bus {
     interrupt_master_enable: bool,
     low_ram: [u8; 0x2000],
     high_ram: [u8; 0x7F],
-    cartridge_ram: [u8; 0x2000],
     cartridge: Cartridge,
     timer: Timer,
     pub serial: Serial,
     pub ppu: Ppu,
+    pub joypad: Joypad,
 }
 
 impl Bus {
@@ -35,10 +36,10 @@ impl Bus {
             interrupt_master_enable: Default::default(),
             low_ram: [0; 0x2000],
             high_ram: [0; 0x7F],
-            cartridge_ram: [0; 0x2000],
             timer: Default::default(),
             serial: Default::default(),
             ppu: Default::default(),
+            joypad: Default::default(),
             cartridge,
         };
 
@@ -92,31 +93,118 @@ impl Bus {
             self.interrupt_flag |= Self::LCD_STAT_INTERRUPT_MASK;
         }
 
+        if self.joypad.poll_interrupt() {
+            self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
+        }
+
         self.timer.step();
         self.ppu.step();
     }
 
     pub fn read_byte_address(&self, address: u16) -> u8 {
         match address {
-            0x0000..=0x7FFF => self.cartridge.read_rom(address),
+            0x0000..=0x7FFF => self.cartridge.read(address),
             0x8000..=0x97FF => self.ppu.read_character_ram(address - 0x8000),
             0x9800..=0x9BFF => self.ppu.read_bg_map_data_1(address - 0x9800),
             0x9C00..=0x9FFF => self.ppu.read_bg_map_data_2(address - 0x9C00),
-            0xA000..=0xBFFF => self.cartridge_ram[usize::from(address - 0xA000)],
+            0xA000..=0xBFFF => self.cartridge.read(address),
             0xC000..=0xDFFF => self.low_ram[usize::from(address - 0xC000)],
             0xE000..=0xFDFF => self.read_byte_address(address - 0x2000), // echo ram
             0xFE00..=0xFE9F => self.ppu.read_object_attribute_memory(address - 0xFE00),
             0xFEA0..=0xFEFF => 0x00, // unusable memory, read returns garbage
-            0xFF00 => {
-                eprintln!("reading from unimplemented P1");
-                0xFF
-            }
+            0xFF00 => self.joypad.read(),
+            0xFF04 => self.timer.get_divider_register(),
             0xFF0F => self.interrupt_flag,
+            0xFF10 => {
+                eprintln!("reading from unimplemented NR10");
+                0
+            }
+            0xFF11 => {
+                eprintln!("reading from unimplemented NR11");
+                0
+            }
+            0xFF12 => {
+                eprintln!("reading from unimplemented NR12");
+                0
+            }
+            0xFF13 => {
+                eprintln!("reading from unimplemented NR13");
+                0
+            }
+            0xFF14 => {
+                eprintln!("reading from unimplemented NR14");
+                0
+            }
+            0xFF16 => {
+                eprintln!("reading from unimplemented NR21");
+                0
+            }
+            0xFF17 => {
+                eprintln!("reading from unimplemented NR22");
+                0
+            }
+            0xFF18 => {
+                eprintln!("reading from unimplemented NR23");
+                0
+            }
+            0xFF19 => {
+                eprintln!("reading from unimplemented NR24");
+                0
+            }
+            0xFF1A => {
+                eprintln!("reading from unimplemented NR30");
+                0
+            }
+            0xFF1B => {
+                eprintln!("reading from unimplemented NR31");
+                0
+            }
+            0xFF1C => {
+                eprintln!("reading from unimplemented NR32");
+                0
+            }
+            0xFF1D => {
+                eprintln!("reading from unimplemented NR33");
+                0
+            }
+            0xFF1E => {
+                eprintln!("reading from unimplemented NR34");
+                0
+            }
+            0xFF20 => {
+                eprintln!("reading from unimplemented NR41");
+                0
+            }
+            0xFF21 => {
+                eprintln!("reading from unimplemented NR42");
+                0
+            }
+            0xFF22 => {
+                eprintln!("reading from unimplemented NR43");
+                0
+            }
+            0xFF23 => {
+                eprintln!("reading from unimplemented NR44");
+                0
+            }
+            0xFF24 => {
+                eprintln!("reading from unimplemented NR50");
+                0
+            }
+            0xFF25 => {
+                eprintln!("reading from unimplemented NR51");
+                0
+            }
+            0xFF26 => {
+                eprintln!("reading from unimplemented NR52");
+                0
+            }
             0xFF40 => self.ppu.read_lcd_control(),
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.read_scroll_y(),
             0xFF43 => self.ppu.read_scroll_x(),
             0xFF44 => self.ppu.read_lcd_y(),
+            0xFF45 => self.ppu.read_lcd_y_compare(),
             0xFF47 => self.ppu.read_bg_palette(),
             0xFF48 => self.ppu.read_obj_palette_1(),
             0xFF49 => self.ppu.read_obj_palette_2(),
@@ -143,20 +231,20 @@ impl Bus {
 
     pub fn write_byte_address(&mut self, value: u8, address: u16) {
         match address {
-            0x0000..=0x7FFF => self.cartridge.write_rom(value, address),
+            0x0000..=0x7FFF => self.cartridge.write(value, address),
             0x8000..=0x97FF => {
                 self.ppu.write_character_ram(value, address - 0x8000);
             }
             0x9800..=0x9BFF => self.ppu.write_bg_map_data_1(value, address - 0x9800),
             0x9C00..=0x9FFF => self.ppu.write_bg_map_data_2(value, address - 0x9C00),
-            0xA000..=0xBFFF => self.cartridge_ram[usize::from(address - 0xA000)] = value,
+            0xA000..=0xBFFF => self.cartridge.write(value, address),
             0xC000..=0xDFFF => self.low_ram[usize::from(address - 0xC000)] = value,
             0xE000..=0xFDFF => self.write_byte_address(value, address - 0x2000), // echo ram
             0xFE00..=0xFE9F => self
                 .ppu
                 .write_object_attribute_memory(value, address - 0xFE00),
             0xFEA0..=0xFEFF => {} // unusable memory, write is no-op
-            0xFF00 => eprintln!("writing 0x{:02X} to unimplemented P1", value),
+            0xFF00 => self.joypad.write(value),
             0xFF01 => self.serial.write_byte(value),
             0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
             0xFF04 => self.timer.set_divider_register(value),
@@ -194,12 +282,13 @@ impl Bus {
             0xFF41 => self.ppu.write_stat(value),
             0xFF42 => self.ppu.write_scroll_y(value),
             0xFF43 => self.ppu.write_scroll_x(value),
+            0xFF45 => self.ppu.write_lcd_y_compare(value),
             0xFF46 => {
                 // DMA
                 let start_address = u16::from(value) * 0x100;
                 for offset in 0..0xA0 {
                     let data = self.read_byte_address(start_address + offset);
-                    self.ppu.write_object_attribute_memory(data, offset);
+                    self.write_byte_address(data, 0xFE00 + offset);
                 }
             }
             0xFF47 => self.ppu.write_bg_palette(value),

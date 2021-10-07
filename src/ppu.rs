@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::default::Default;
 
 enum PpuMode {
@@ -22,15 +23,46 @@ pub enum PaletteColor {
     Black,
 }
 
+#[derive(Clone, Copy, Default)]
+struct SpriteAttributeInfo {
+    pub y_position: u8,
+    pub x_position: u8,
+    pub tile_index: u8,
+    pub flags: u8,
+}
+
+impl SpriteAttributeInfo {
+    fn get_bg_window_over_obj(&self) -> bool {
+        const BG_WINDOW_OVER_OBJ_MASK: u8 = 1 << 7;
+        (self.flags & BG_WINDOW_OVER_OBJ_MASK) != 0
+    }
+
+    fn get_y_flip(&self) -> bool {
+        const Y_FLIP_MASK: u8 = 1 << 6;
+        (self.flags & Y_FLIP_MASK) != 0
+    }
+
+    fn get_x_flip(&self) -> bool {
+        const X_FLIP_MASK: u8 = 1 << 5;
+        (self.flags & X_FLIP_MASK) != 0
+    }
+
+    fn use_low_palette(&self) -> bool {
+        const LOW_PALETTE_MASK: u8 = 1 << 4;
+        (self.flags & LOW_PALETTE_MASK) != 0
+    }
+}
+
 pub struct Ppu {
     character_ram: [u8; 0x1800],
     bg_map_data_1: [u8; 0x400],
     bg_map_data_2: [u8; 0x400],
-    object_attribute_memory: [u8; 0xA0],
+    object_attributes: [SpriteAttributeInfo; 40],
     vblank_interrupt_waiting: bool,
     stat_interrupt_waiting: bool,
     dot: u16,
     lcd_y: u8,
+    lcd_y_compare: u8,
     stat: u8,
     lcd_control: u8,
     scroll_x: u8,
@@ -50,11 +82,12 @@ impl Default for Ppu {
             character_ram: [0; 0x1800],
             bg_map_data_1: [0; 0x400],
             bg_map_data_2: [0; 0x400],
-            object_attribute_memory: [0; 0xA0],
+            object_attributes: [Default::default(); 40],
             vblank_interrupt_waiting: Default::default(),
             stat_interrupt_waiting: Default::default(),
             dot: Default::default(),
             lcd_y: Default::default(),
+            lcd_y_compare: Default::default(),
             stat: Default::default(),
             lcd_control: Default::default(),
             scroll_x: Default::default(),
@@ -71,9 +104,16 @@ impl Default for Ppu {
 }
 
 impl Ppu {
-    const STAT_LYC_EQUAL_LY_MASK: u8 = 0b0000_0100;
-
     pub fn step(&mut self) {
+        if self.lcd_y == self.lcd_y_compare {
+            if self.stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy) {
+                self.stat_interrupt_waiting = true;
+                self.set_stat_lyc_equals_ly(true);
+            } else {
+                self.set_stat_lyc_equals_ly(false);
+            }
+        }
+
         if self.lcd_y < 144 {
             if self.dot == 0 {
                 if self.stat_interrupt_source_enabled(StatInterruptSource::OAMSearch) {
@@ -104,10 +144,13 @@ impl Ppu {
         }
 
         if matches!(self.mode, PpuMode::PixelTransfer) {
-            let render_x = self.dot - 80;
-            let render_y = u16::from(self.lcd_y);
+            let buffer_x = u8::try_from(self.dot - 80).unwrap();
+            let buffer_y = self.lcd_y;
 
-            if render_x < 160 {
+            let render_x = u16::from(buffer_x.wrapping_add(self.scroll_x));
+            let render_y = u16::from(buffer_y.wrapping_add(self.scroll_y));
+
+            if buffer_x < 160 {
                 let tile_x = render_x / 8;
                 let tile_y = render_y / 8;
                 let tile_idx = tile_x + (tile_y * 32);
@@ -126,7 +169,53 @@ impl Ppu {
                     (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
 
                 let pixel_color = self.bg_palette[pixel_palette_idx];
-                self.buffer[usize::from(render_y)][usize::from(render_x)] = pixel_color;
+                self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
+
+                for attribute_info in self.object_attributes {
+                    if buffer_y + 16 >= attribute_info.y_position
+                        && buffer_y + 16 < attribute_info.y_position + 8
+                        && buffer_x + 8 >= attribute_info.x_position
+                        && buffer_x + 8 < attribute_info.x_position + 8
+                    {
+                        if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
+                            continue;
+                        }
+
+                        let sprite_y_offset = if attribute_info.get_y_flip() {
+                            7 - (buffer_y + 16 - attribute_info.y_position)
+                        } else {
+                            buffer_y + 16 - attribute_info.y_position
+                        };
+
+                        let sprite_x_offset = if attribute_info.get_x_flip() {
+                            7 - (buffer_x + 8 - attribute_info.x_position)
+                        } else {
+                            buffer_x + 8 - attribute_info.x_position
+                        };
+
+                        let sprite_data = self.get_obj_tile_data(attribute_info.tile_index);
+                        let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
+                        let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
+
+                        let lsb_pixel_color = (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                        let msb_pixel_color = (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                        let pixel_palette_idx =
+                            (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
+
+                        if pixel_palette_idx != 0 {
+                            let pixel_color = if attribute_info.use_low_palette() {
+                                self.obj_palette_2[pixel_palette_idx]
+                            } else {
+                                self.obj_palette_1[pixel_palette_idx]
+                            };
+
+                            self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
+                        }
+
+                        break;
+                    }
+                }
             }
         }
 
@@ -210,8 +299,19 @@ impl Ppu {
             PpuMode::PixelTransfer => PIXEL_TRANSFER_MODE_MASK,
         };
     }
+
+    fn set_stat_lyc_equals_ly(&mut self, equals: bool) {
+        const STAT_LYC_EQUAL_LY_MASK: u8 = 0b0000_0100;
+
+        if equals {
+            self.stat |= STAT_LYC_EQUAL_LY_MASK;
+        } else {
+            self.stat &= !STAT_LYC_EQUAL_LY_MASK;
+        }
+    }
 }
 
+#[derive(Clone, Copy, Debug)]
 enum ObjSize {
     EightByEight,
     EightBySixteen,
@@ -224,6 +324,7 @@ impl Ppu {
 
     pub fn write_lcd_control(&mut self, data: u8) {
         self.lcd_control = data;
+        assert!(matches!(self.get_obj_size(), ObjSize::EightByEight));
     }
 
     fn get_lcd_ppu_enable(&self) -> bool {
@@ -263,6 +364,10 @@ impl Ppu {
         } else {
             self.bg_map_data_2[usize::from(index)]
         }
+    }
+
+    fn get_obj_tile_data(&self, tile_id: u8) -> &[u8] {
+        &self.character_ram[usize::from(tile_id) * 16..][..16]
     }
 
     fn get_obj_size(&self) -> ObjSize {
@@ -306,6 +411,14 @@ impl Ppu {
         self.lcd_y
     }
 
+    pub fn read_lcd_y_compare(&self) -> u8 {
+        self.lcd_y_compare
+    }
+
+    pub fn write_lcd_y_compare(&mut self, value: u8) {
+        self.lcd_y_compare = value
+    }
+
     pub fn read_window_y(&self) -> u8 {
         self.window_y
     }
@@ -324,7 +437,7 @@ impl Ppu {
 
     pub fn read_bg_palette(&self) -> u8 {
         let mut result = 0;
-        for color in self.bg_palette {
+        for color in self.bg_palette.iter().rev() {
             result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
@@ -339,8 +452,8 @@ impl Ppu {
     }
 
     pub fn write_bg_palette(&mut self, mut value: u8) {
-        for palette_val in self.bg_palette.iter_mut() {
-            *palette_val = match value & 0b11 {
+        for palette in self.bg_palette.iter_mut() {
+            *palette = match value & 0b11 {
                 0b00 => PaletteColor::White,
                 0b01 => PaletteColor::LightGray,
                 0b10 => PaletteColor::DarkGray,
@@ -354,57 +467,61 @@ impl Ppu {
 
     pub fn read_obj_palette_1(&self) -> u8 {
         let mut result = 0;
-        for (i, color) in self.obj_palette_1.iter().enumerate() {
-            let this_value = match color {
+        for color in self.obj_palette_1.iter().rev() {
+            result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
                 PaletteColor::DarkGray => 0b10,
                 PaletteColor::Black => 0b11,
             };
 
-            result |= this_value << (i * 2);
+            result <<= 2;
         }
 
         result
     }
 
-    pub fn write_obj_palette_1(&mut self, value: u8) {
-        for i in 0..4 {
-            self.obj_palette_1[i] = match (value >> (i * 2)) & 0b0000_0011 {
+    pub fn write_obj_palette_1(&mut self, mut value: u8) {
+        for palette in self.obj_palette_1.iter_mut() {
+            *palette = match value & 0b11 {
                 0b00 => PaletteColor::White,
                 0b01 => PaletteColor::LightGray,
                 0b10 => PaletteColor::DarkGray,
                 0b11 => PaletteColor::Black,
                 _ => unreachable!(),
             };
+
+            value >>= 2;
         }
     }
 
     pub fn read_obj_palette_2(&self) -> u8 {
         let mut result = 0;
-        for (i, color) in self.obj_palette_2.iter().enumerate() {
-            let this_value = match color {
+        for color in self.obj_palette_2.iter().rev() {
+            result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
                 PaletteColor::DarkGray => 0b10,
                 PaletteColor::Black => 0b11,
             };
 
-            result |= this_value << (i * 2);
+            result <<= 2;
         }
 
         result
     }
 
-    pub fn write_obj_palette_2(&mut self, value: u8) {
-        for i in 0..4 {
-            self.obj_palette_2[i] = match (value >> (i * 2)) & 0b0000_0011 {
+    pub fn write_obj_palette_2(&mut self, mut value: u8) {
+        for palette in self.obj_palette_2.iter_mut() {
+            *palette = match value & 0b11 {
                 0b00 => PaletteColor::White,
                 0b01 => PaletteColor::LightGray,
                 0b10 => PaletteColor::DarkGray,
                 0b11 => PaletteColor::Black,
                 _ => unreachable!(),
             };
+
+            value >>= 2;
         }
     }
 
@@ -433,10 +550,24 @@ impl Ppu {
     }
 
     pub fn read_object_attribute_memory(&self, offset: u16) -> u8 {
-        self.object_attribute_memory[usize::from(offset)]
+        let attribute_info = &self.object_attributes[usize::from(offset / 4)];
+        match offset % 4 {
+            0 => attribute_info.y_position,
+            1 => attribute_info.x_position,
+            2 => attribute_info.tile_index,
+            3 => attribute_info.flags,
+            _ => unreachable!(),
+        }
     }
 
     pub fn write_object_attribute_memory(&mut self, data: u8, offset: u16) {
-        self.object_attribute_memory[usize::from(offset)] = data
+        let attribute_info = &mut self.object_attributes[usize::from(offset / 4)];
+        match offset % 4 {
+            0 => attribute_info.y_position = data,
+            1 => attribute_info.x_position = data,
+            2 => attribute_info.tile_index = data,
+            3 => attribute_info.flags = data,
+            _ => unreachable!(),
+        };
     }
 }
