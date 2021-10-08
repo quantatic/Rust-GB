@@ -62,6 +62,7 @@ struct Mbc1 {
     rom_bank: usize,
     ram: Vec<[u8; 0x2000]>,
     ram_bank: usize,
+    ram_enabled: bool,
 }
 
 impl Mbc1 {
@@ -81,6 +82,7 @@ impl Mbc1 {
             rom_bank: 1,
             ram,
             ram_bank: 0,
+            ram_enabled: false,
         })
     }
 
@@ -88,14 +90,20 @@ impl Mbc1 {
         match offset {
             0x0000..=0x3FFF => self.rom[0][usize::from(offset)],
             0x4000..=0x7FFF => self.rom[self.rom_bank][usize::from(offset - 0x4000)],
-            0xA000..=0xBFFF => self.ram[self.ram_bank][usize::from(offset - 0xA000)],
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    self.ram[self.ram_bank][usize::from(offset - 0xA000)]
+                } else {
+                    0xFF
+                }
+            }
             _ => unreachable!(),
         }
     }
 
     fn write(&mut self, value: u8, offset: u16) {
         match offset {
-            0x0000..=0x1FFF => {} // RAM enable
+            0x0000..=0x1FFF => self.ram_enabled = value != 0,
             0x2000..=0x3FFF => {
                 self.rom_bank = if value == 0 {
                     1
@@ -105,7 +113,11 @@ impl Mbc1 {
             }
             0x4000..=0x5FFF => self.ram_bank = usize::from(value & 0b11),
             0x6000..=0x7FFF => todo!("banking mode select"),
-            0xA000..=0xBFFF => self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value,
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value;
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -117,6 +129,7 @@ struct Mbc3 {
     rom_bank: usize,
     ram: Vec<[u8; 0x2000]>,
     ram_bank: usize,
+    ram_enabled: bool,
     rtc_secs: u8,
     rtc_mins: u8,
     rtc_hours: u8,
@@ -141,6 +154,7 @@ impl Mbc3 {
             rom_bank: 1,
             ram,
             ram_bank: 0,
+            ram_enabled: false,
             rtc_secs: 0,
             rtc_mins: 0,
             rtc_hours: 0,
@@ -153,34 +167,46 @@ impl Mbc3 {
         match offset {
             0x0000..=0x3FFF => self.rom[0][usize::from(offset)],
             0x4000..=0x7FFF => self.rom[self.rom_bank][usize::from(offset - 0x4000)],
-            0xA000..=0xBFFF => match self.ram_bank {
-                0x00..=0x03 => self.ram[self.ram_bank][usize::from(offset - 0xA000)],
-                0x08 => self.rtc_secs,
-                0x09 => self.rtc_mins,
-                0x0A => self.rtc_hours,
-                0x0B => self.rtc_dl,
-                0x0C => self.rtc_dh,
-                _ => unreachable!(),
-            },
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    match self.ram_bank {
+                        0x00..=0x03 => self.ram[self.ram_bank][usize::from(offset - 0xA000)],
+                        0x08 => self.rtc_secs,
+                        0x09 => self.rtc_mins,
+                        0x0A => self.rtc_hours,
+                        0x0B => self.rtc_dl,
+                        0x0C => self.rtc_dh,
+                        _ => unreachable!(),
+                    }
+                } else {
+                    0xFF
+                }
+            }
             _ => unreachable!(),
         }
     }
 
     fn write(&mut self, value: u8, offset: u16) {
         match offset {
-            0x0000..=0x1FFF => {} // RAM and timer enable
+            0x0000..=0x1FFF => self.ram_enabled = value != 0,
             0x2000..=0x3FFF => self.rom_bank = if value == 0 { 1 } else { usize::from(value) },
             0x4000..=0x5FFF => self.ram_bank = usize::from(value),
             0x6000..=0x7FFF => eprintln!("unimplemented latching clock data"),
-            0xA000..=0xBFFF => match self.ram_bank {
-                0x00..=0x03 => self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value,
-                0x08 => self.rtc_secs = value,
-                0x09 => self.rtc_mins = value,
-                0x0A => self.rtc_hours = value,
-                0x0B => self.rtc_dl = value,
-                0x0C => self.rtc_dh = value,
-                _ => unreachable!(),
-            },
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    match self.ram_bank {
+                        0x00..=0x03 => {
+                            self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value
+                        }
+                        0x08 => self.rtc_secs = value,
+                        0x09 => self.rtc_mins = value,
+                        0x0A => self.rtc_hours = value,
+                        0x0B => self.rtc_dl = value,
+                        0x0C => self.rtc_dh = value,
+                        _ => unreachable!(),
+                    }
+                }
+            }
             _ => unreachable!(),
         }
     }

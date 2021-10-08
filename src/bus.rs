@@ -1,4 +1,5 @@
 use crate::{
+    apu::Apu,
     cartridge::{self, Cartridge},
     joypad::Joypad,
     ppu::Ppu,
@@ -27,6 +28,7 @@ pub struct Bus {
     pub serial: Serial,
     pub ppu: Ppu,
     pub joypad: Joypad,
+    pub apu: Apu,
 }
 
 impl Bus {
@@ -41,6 +43,7 @@ impl Bus {
             serial: Default::default(),
             ppu: Default::default(),
             joypad: Default::default(),
+            apu: Default::default(),
             cartridge,
         };
 
@@ -119,90 +122,27 @@ impl Bus {
             0xFF06 => self.timer.get_timer_modulo(),
             0xFF07 => self.timer.get_timer_control(),
             0xFF0F => self.interrupt_flag,
-            0xFF10 => {
-                eprintln!("reading from unimplemented NR10");
-                0
-            }
-            0xFF11 => {
-                eprintln!("reading from unimplemented NR11");
-                0
-            }
-            0xFF12 => {
-                eprintln!("reading from unimplemented NR12");
-                0
-            }
-            0xFF13 => {
-                eprintln!("reading from unimplemented NR13");
-                0
-            }
-            0xFF14 => {
-                eprintln!("reading from unimplemented NR14");
-                0
-            }
-            0xFF16 => {
-                eprintln!("reading from unimplemented NR21");
-                0
-            }
-            0xFF17 => {
-                eprintln!("reading from unimplemented NR22");
-                0
-            }
-            0xFF18 => {
-                eprintln!("reading from unimplemented NR23");
-                0
-            }
-            0xFF19 => {
-                eprintln!("reading from unimplemented NR24");
-                0
-            }
-            0xFF1A => {
-                eprintln!("reading from unimplemented NR30");
-                0
-            }
-            0xFF1B => {
-                eprintln!("reading from unimplemented NR31");
-                0
-            }
-            0xFF1C => {
-                eprintln!("reading from unimplemented NR32");
-                0
-            }
-            0xFF1D => {
-                eprintln!("reading from unimplemented NR33");
-                0
-            }
-            0xFF1E => {
-                eprintln!("reading from unimplemented NR34");
-                0
-            }
-            0xFF20 => {
-                eprintln!("reading from unimplemented NR41");
-                0
-            }
-            0xFF21 => {
-                eprintln!("reading from unimplemented NR42");
-                0
-            }
-            0xFF22 => {
-                eprintln!("reading from unimplemented NR43");
-                0
-            }
-            0xFF23 => {
-                eprintln!("reading from unimplemented NR44");
-                0
-            }
-            0xFF24 => {
-                eprintln!("reading from unimplemented NR50");
-                0
-            }
-            0xFF25 => {
-                eprintln!("reading from unimplemented NR51");
-                0
-            }
-            0xFF26 => {
-                eprintln!("reading from unimplemented NR52");
-                0
-            }
+            0xFF10 => self.apu.read_nr10(),
+            0xFF11 => self.apu.read_nr11(),
+            0xFF12 => self.apu.read_nr12(),
+            0xFF13 => self.apu.read_nr13(),
+            0xFF14 => self.apu.read_nr14(),
+            0xFF16 => self.apu.read_nr21(),
+            0xFF17 => self.apu.read_nr22(),
+            0xFF18 => self.apu.read_nr23(),
+            0xFF19 => self.apu.read_nr24(),
+            0xFF1A => self.apu.read_nr30(),
+            0xFF1B => self.apu.read_nr31(),
+            0xFF1C => self.apu.read_nr32(),
+            0xFF1D => self.apu.read_nr33(),
+            0xFF1E => self.apu.read_nr34(),
+            0xFF20 => self.apu.read_nr41(),
+            0xFF21 => self.apu.read_nr42(),
+            0xFF22 => self.apu.read_nr43(),
+            0xFF23 => self.apu.read_nr44(),
+            0xFF24 => self.apu.read_nr50(),
+            0xFF25 => self.apu.read_nr51(),
+            0xFF26 => self.apu.read_nr52(),
             0xFF40 => self.ppu.read_lcd_control(),
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.read_scroll_y(),
@@ -255,27 +195,27 @@ impl Bus {
             0xFF0F => {
                 self.interrupt_flag = value & 0b0001_1111;
             }
-            0xFF10 => eprintln!("writing 0x{:02X} to unimplemented NR10", value),
-            0xFF11 => eprintln!("writing 0x{:02X} to unimplemented NR11", value),
-            0xFF12 => eprintln!("writing 0x{:02X} to unimplemented NR12", value),
-            0xFF13 => eprintln!("writing 0x{:02X} to unimplemented NR13", value),
-            0xFF14 => eprintln!("writing 0x{:02X} to unimplemented NR14", value),
-            0xFF16 => eprintln!("writing 0x{:02X} to unimplemented NR21", value),
-            0xFF17 => eprintln!("writing 0x{:02X} to unimplemented NR22", value),
-            0xFF18 => eprintln!("writing 0x{:02X} to unimplemented NR23", value),
-            0xFF19 => eprintln!("writing 0x{:02X} to unimplemented NR24", value),
-            0xFF1A => eprintln!("writing 0x{:02X} to unimplemented NR30", value),
-            0xFF1B => eprintln!("writing 0x{:02X} to unimplemented NR31", value),
-            0xFF1C => eprintln!("writing 0x{:02X} to unimplemented NR32", value),
-            0xFF1D => eprintln!("writing 0x{:02X} to unimplemented NR33", value),
-            0xFF1E => eprintln!("writing 0x{:02X} to unimplemented NR34", value),
-            0xFF20 => eprintln!("writing 0x{:02X} to unimplemented NR41", value),
-            0xFF21 => eprintln!("writing 0x{:02X} to unimplemented NR42", value),
-            0xFF22 => eprintln!("writing 0x{:02X} to unimplemented NR43", value),
-            0xFF23 => eprintln!("writing 0x{:02X} to unimplemented NR44", value),
-            0xFF24 => eprintln!("writing 0x{:02X} to unimplemented NR50", value),
-            0xFF25 => eprintln!("writing 0x{:02X} to unimplemented NR51", value),
-            0xFF26 => eprintln!("writing 0x{:02X} to unimplemented NR52", value),
+            0xFF10 => self.apu.write_nr10(value),
+            0xFF11 => self.apu.write_nr11(value),
+            0xFF12 => self.apu.write_nr12(value),
+            0xFF13 => self.apu.write_nr13(value),
+            0xFF14 => self.apu.write_nr14(value),
+            0xFF16 => self.apu.write_nr21(value),
+            0xFF17 => self.apu.write_nr22(value),
+            0xFF18 => self.apu.write_nr23(value),
+            0xFF19 => self.apu.write_nr24(value),
+            0xFF1A => self.apu.write_nr30(value),
+            0xFF1B => self.apu.write_nr31(value),
+            0xFF1C => self.apu.write_nr32(value),
+            0xFF1D => self.apu.write_nr33(value),
+            0xFF1E => self.apu.write_nr34(value),
+            0xFF20 => self.apu.write_nr41(value),
+            0xFF21 => self.apu.write_nr42(value),
+            0xFF22 => self.apu.write_nr43(value),
+            0xFF23 => self.apu.write_nr44(value),
+            0xFF24 => self.apu.write_nr50(value),
+            0xFF25 => self.apu.write_nr51(value),
+            0xFF26 => self.apu.write_nr52(value),
             0xFF30..=0xFF3F => eprintln!(
                 "writing 0x{:02X} to WAVE_PATTERN_RAM[{:02X}]",
                 value,

@@ -76,7 +76,6 @@ pub struct Ppu {
     bg_palette: [PaletteColor; 4],
     obj_palette_1: [PaletteColor; 4],
     obj_palette_2: [PaletteColor; 4],
-    mode: PpuMode,
 }
 
 impl Default for Ppu {
@@ -101,7 +100,6 @@ impl Default for Ppu {
             bg_palette: [PaletteColor::White; 4],
             obj_palette_1: [PaletteColor::White; 4],
             obj_palette_2: [PaletteColor::White; 4],
-            mode: PpuMode::OAMSearch,
         }
     }
 }
@@ -109,44 +107,27 @@ impl Default for Ppu {
 impl Ppu {
     pub fn step(&mut self) {
         if self.lcd_y == self.lcd_y_compare {
-            if self.stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy) {
-                self.stat_interrupt_waiting = true;
-                self.set_stat_lyc_equals_ly(true);
-            } else {
-                self.set_stat_lyc_equals_ly(false);
-            }
+            self.set_stat_lyc_equals_ly(true);
+        } else {
+            self.set_stat_lyc_equals_ly(false);
         }
 
         if self.lcd_y < 144 {
             if self.dot == 0 {
-                if self.stat_interrupt_source_enabled(StatInterruptSource::OAMSearch) {
-                    self.stat_interrupt_waiting = true;
-                }
-
                 self.set_stat_mode(PpuMode::OAMSearch);
-                self.mode = PpuMode::OAMSearch;
             } else if self.dot == 80 {
                 self.set_stat_mode(PpuMode::PixelTransfer);
-                self.mode = PpuMode::PixelTransfer;
             } else if self.dot == 252 {
-                if self.stat_interrupt_source_enabled(StatInterruptSource::HBlank) {
-                    self.stat_interrupt_waiting = true;
-                }
                 self.set_stat_mode(PpuMode::HBlank);
-                self.mode = PpuMode::HBlank;
             }
         } else if self.lcd_y == 144 {
             if self.dot == 0 {
-                if self.stat_interrupt_source_enabled(StatInterruptSource::VBlank) {
-                    self.stat_interrupt_waiting = true;
-                }
                 self.set_stat_mode(PpuMode::VBlank);
-                self.mode = PpuMode::VBlank;
                 self.vblank_interrupt_waiting = true;
             }
         }
 
-        if matches!(self.mode, PpuMode::PixelTransfer) {
+        if matches!(self.get_stat_mode(), PpuMode::PixelTransfer) {
             let buffer_x = u8::try_from(self.dot - 80).unwrap();
             let buffer_y = self.lcd_y;
 
@@ -215,96 +196,108 @@ impl Ppu {
 
                         non_zero_bg_window_pixel_drawn |= window_pixel_palette_idx != 0;
                     }
+                } else {
+                    self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = self.bg_palette[0];
                 }
 
-                for attribute_info in self.object_attributes {
-                    if attribute_info.get_bg_window_over_obj() && non_zero_bg_window_pixel_drawn {
-                        continue;
-                    }
-
-                    if buffer_y + 16 >= attribute_info.y_position
-                        && buffer_y + 8 < attribute_info.y_position
-                        && buffer_x + 8 >= attribute_info.x_position
-                        && buffer_x < attribute_info.x_position
-                    {
-                        let sprite_y_offset = if attribute_info.get_y_flip() {
-                            7 - (buffer_y + 16 - attribute_info.y_position)
-                        } else {
-                            buffer_y + 16 - attribute_info.y_position
-                        };
-
-                        let sprite_x_offset = if attribute_info.get_x_flip() {
-                            7 - (buffer_x + 8 - attribute_info.x_position)
-                        } else {
-                            buffer_x + 8 - attribute_info.x_position
-                        };
-
-                        let sprite_data = match self.get_obj_size() {
-                            ObjSize::EightByEight => {
-                                self.get_obj_tile_data(attribute_info.tile_index)
-                            }
-                            ObjSize::EightBySixteen => {
-                                self.get_obj_tile_data(attribute_info.tile_index & (!0x01))
-                            }
-                        };
-                        let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
-                        let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
-
-                        let lsb_pixel_color = (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-                        let msb_pixel_color = (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-
-                        let pixel_palette_idx =
-                            (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
-
-                        if pixel_palette_idx != 0 {
-                            let pixel_color = if attribute_info.use_low_palette() {
-                                self.obj_palette_2[pixel_palette_idx]
-                            } else {
-                                self.obj_palette_1[pixel_palette_idx]
-                            };
-
-                            self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
-
-                            break;
+                if self.get_obj_enable() {
+                    for attribute_info in self.object_attributes {
+                        if attribute_info.get_bg_window_over_obj() && non_zero_bg_window_pixel_drawn
+                        {
+                            continue;
                         }
-                    } else if matches!(self.get_obj_size(), ObjSize::EightBySixteen)
-                        && buffer_y + 8 >= attribute_info.y_position
-                        && buffer_y < attribute_info.y_position
-                        && buffer_x + 8 >= attribute_info.x_position
-                        && buffer_x < attribute_info.x_position
-                    {
-                        let sprite_y_offset = if attribute_info.get_y_flip() {
-                            7 - (buffer_y + 8 - attribute_info.y_position)
-                        } else {
-                            buffer_y + 8 - attribute_info.y_position
-                        };
 
-                        let sprite_x_offset = if attribute_info.get_x_flip() {
-                            7 - (buffer_x + 8 - attribute_info.x_position)
-                        } else {
-                            buffer_x + 8 - attribute_info.x_position
-                        };
-
-                        let sprite_data = self.get_obj_tile_data(attribute_info.tile_index | 0x01);
-                        let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
-                        let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
-
-                        let lsb_pixel_color = (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-                        let msb_pixel_color = (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-
-                        let pixel_palette_idx =
-                            (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
-
-                        if pixel_palette_idx != 0 {
-                            let pixel_color = if attribute_info.use_low_palette() {
-                                self.obj_palette_2[pixel_palette_idx]
+                        if buffer_y + 16 >= attribute_info.y_position
+                            && buffer_y + 8 < attribute_info.y_position
+                            && buffer_x + 8 >= attribute_info.x_position
+                            && buffer_x < attribute_info.x_position
+                        {
+                            let sprite_y_offset = if attribute_info.get_y_flip() {
+                                7 - (buffer_y + 16 - attribute_info.y_position)
                             } else {
-                                self.obj_palette_1[pixel_palette_idx]
+                                buffer_y + 16 - attribute_info.y_position
                             };
 
-                            self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
+                            let sprite_x_offset = if attribute_info.get_x_flip() {
+                                7 - (buffer_x + 8 - attribute_info.x_position)
+                            } else {
+                                buffer_x + 8 - attribute_info.x_position
+                            };
 
-                            break;
+                            let sprite_data = match self.get_obj_size() {
+                                ObjSize::EightByEight => {
+                                    self.get_obj_tile_data(attribute_info.tile_index)
+                                }
+                                ObjSize::EightBySixteen => {
+                                    self.get_obj_tile_data(attribute_info.tile_index & (!0x01))
+                                }
+                            };
+                            let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
+                            let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
+
+                            let lsb_pixel_color =
+                                (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                            let msb_pixel_color =
+                                (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                            let pixel_palette_idx =
+                                (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
+
+                            if pixel_palette_idx != 0 {
+                                let pixel_color = if attribute_info.use_low_palette() {
+                                    self.obj_palette_2[pixel_palette_idx]
+                                } else {
+                                    self.obj_palette_1[pixel_palette_idx]
+                                };
+
+                                self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] =
+                                    pixel_color;
+
+                                break;
+                            }
+                        } else if matches!(self.get_obj_size(), ObjSize::EightBySixteen)
+                            && buffer_y + 8 >= attribute_info.y_position
+                            && buffer_y < attribute_info.y_position
+                            && buffer_x + 8 >= attribute_info.x_position
+                            && buffer_x < attribute_info.x_position
+                        {
+                            let sprite_y_offset = if attribute_info.get_y_flip() {
+                                7 - (buffer_y + 8 - attribute_info.y_position)
+                            } else {
+                                buffer_y + 8 - attribute_info.y_position
+                            };
+
+                            let sprite_x_offset = if attribute_info.get_x_flip() {
+                                7 - (buffer_x + 8 - attribute_info.x_position)
+                            } else {
+                                buffer_x + 8 - attribute_info.x_position
+                            };
+
+                            let sprite_data =
+                                self.get_obj_tile_data(attribute_info.tile_index | 0x01);
+                            let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
+                            let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
+
+                            let lsb_pixel_color =
+                                (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                            let msb_pixel_color =
+                                (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                            let pixel_palette_idx =
+                                (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
+
+                            if pixel_palette_idx != 0 {
+                                let pixel_color = if attribute_info.use_low_palette() {
+                                    self.obj_palette_2[pixel_palette_idx]
+                                } else {
+                                    self.obj_palette_1[pixel_palette_idx]
+                                };
+
+                                self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] =
+                                    pixel_color;
+
+                                break;
+                            }
                         }
                     }
                 }
@@ -357,7 +350,15 @@ impl Ppu {
     pub fn write_stat(&mut self, data: u8) {
         const STAT_WRITE_MASK: u8 = 0b0111_1000;
 
+        let old_interrupt_line = self.get_stat_interrupt_line();
+
         self.stat = (data & STAT_WRITE_MASK) | (self.stat & (!STAT_WRITE_MASK));
+
+        let new_interrupt_line = self.get_stat_interrupt_line();
+
+        if !old_interrupt_line && new_interrupt_line {
+            self.stat_interrupt_waiting = true;
+        }
     }
 
     fn stat_interrupt_source_enabled(&self, source_type: StatInterruptSource) -> bool {
@@ -376,30 +377,81 @@ impl Ppu {
         }
     }
 
-    fn set_stat_mode(&mut self, mode: PpuMode) {
-        const MODE_CLEAR_MASK: u8 = 0b1111_1100;
-        const HBLANK_MODE_MASK: u8 = 0b0000_0000;
-        const VBLANK_MODE_MASK: u8 = 0b0000_0001;
-        const OAM_SEARCH_MODE_MASK: u8 = 0b0000_0010;
-        const PIXEL_TRANSFER_MODE_MASK: u8 = 0b0000_0011;
+    fn get_stat_interrupt_line(&self) -> bool {
+        let ppu_mode = self.get_stat_mode();
+        let lyc_equals_ly_interrupt_line = self
+            .stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy)
+            && self.get_stat_lyc_equals_ly();
+        let mode_interrupt_line = match ppu_mode {
+            PpuMode::HBlank => self.stat_interrupt_source_enabled(StatInterruptSource::HBlank),
+            PpuMode::OAMSearch => {
+                self.stat_interrupt_source_enabled(StatInterruptSource::OAMSearch)
+            }
+            PpuMode::PixelTransfer => false,
+            PpuMode::VBlank => self.stat_interrupt_source_enabled(StatInterruptSource::VBlank),
+        };
 
-        self.stat &= MODE_CLEAR_MASK;
+        lyc_equals_ly_interrupt_line || mode_interrupt_line
+    }
+
+    const STAT_MODE_MASK: u8 = 0b0000_0011;
+    const STAT_HBLANK_MODE_MASK: u8 = 0b0000_0000;
+    const STAT_VBLANK_MODE_MASK: u8 = 0b0000_0001;
+    const STAT_OAM_SEARCH_MODE_MASK: u8 = 0b0000_0010;
+    const STAT_PIXEL_TRANSFER_MODE_MASK: u8 = 0b0000_0011;
+
+    fn set_stat_mode(&mut self, mode: PpuMode) {
+        let old_interrupt_line = self.get_stat_interrupt_line();
+        let line_high = match mode {
+            PpuMode::HBlank => self.stat_interrupt_source_enabled(StatInterruptSource::HBlank),
+            PpuMode::OAMSearch => {
+                self.stat_interrupt_source_enabled(StatInterruptSource::OAMSearch)
+            }
+            PpuMode::PixelTransfer => false,
+            PpuMode::VBlank => self.stat_interrupt_source_enabled(StatInterruptSource::VBlank),
+        };
+
+        if !old_interrupt_line && line_high {
+            self.stat_interrupt_waiting = true
+        }
+
+        self.stat &= !Self::STAT_MODE_MASK;
         self.stat |= match mode {
-            PpuMode::HBlank => HBLANK_MODE_MASK,
-            PpuMode::VBlank => VBLANK_MODE_MASK,
-            PpuMode::OAMSearch => OAM_SEARCH_MODE_MASK,
-            PpuMode::PixelTransfer => PIXEL_TRANSFER_MODE_MASK,
+            PpuMode::HBlank => Self::STAT_HBLANK_MODE_MASK,
+            PpuMode::VBlank => Self::STAT_VBLANK_MODE_MASK,
+            PpuMode::OAMSearch => Self::STAT_OAM_SEARCH_MODE_MASK,
+            PpuMode::PixelTransfer => Self::STAT_PIXEL_TRANSFER_MODE_MASK,
         };
     }
 
-    fn set_stat_lyc_equals_ly(&mut self, equals: bool) {
-        const STAT_LYC_EQUAL_LY_MASK: u8 = 0b0000_0100;
-
-        if equals {
-            self.stat |= STAT_LYC_EQUAL_LY_MASK;
-        } else {
-            self.stat &= !STAT_LYC_EQUAL_LY_MASK;
+    fn get_stat_mode(&self) -> PpuMode {
+        match self.stat & Self::STAT_MODE_MASK {
+            Self::STAT_HBLANK_MODE_MASK => PpuMode::HBlank,
+            Self::STAT_VBLANK_MODE_MASK => PpuMode::VBlank,
+            Self::STAT_OAM_SEARCH_MODE_MASK => PpuMode::OAMSearch,
+            Self::STAT_PIXEL_TRANSFER_MODE_MASK => PpuMode::PixelTransfer,
+            _ => unreachable!(),
         }
+    }
+
+    const STAT_LYC_EQUAL_LY_MASK: u8 = 0b0000_0100;
+
+    fn set_stat_lyc_equals_ly(&mut self, equals: bool) {
+        if equals {
+            let old_interrupt_line = self.get_stat_interrupt_line();
+            let line_high = self.stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy);
+            if !old_interrupt_line && line_high {
+                self.stat_interrupt_waiting = true;
+            }
+
+            self.stat |= Self::STAT_LYC_EQUAL_LY_MASK;
+        } else {
+            self.stat &= !Self::STAT_LYC_EQUAL_LY_MASK;
+        }
+    }
+
+    fn get_stat_lyc_equals_ly(&self) -> bool {
+        (self.stat & Self::STAT_LYC_EQUAL_LY_MASK) != 0
     }
 }
 

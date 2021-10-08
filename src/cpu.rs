@@ -282,7 +282,9 @@ impl Cpu {
         if self.cycles_delay == 0 {
             if let Some(interrupt_type) = self.bus.poll_interrupt() {
                 self.handle_interrupt(interrupt_type);
-                eprintln!("Handled interrupt: {:?}", interrupt_type);
+                if log {
+                    eprintln!("Handled interrupt: {:?}", interrupt_type);
+                }
                 self.cycles_delay = 20;
             } else {
                 if log {

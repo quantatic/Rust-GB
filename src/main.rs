@@ -1,3 +1,4 @@
+mod apu;
 mod bus;
 mod cartridge;
 mod cpu;
@@ -64,6 +65,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut event_pump = sdl_context.event_pump().unwrap();
 
     let mut debug = false;
+
+    for _ in 0..104 {
+        for _ in 0..1_000_000 {
+            cpu.step(false);
+        }
+        cpu.bus.joypad.set_a_pressed(true);
+
+        for _ in 0..2_500_000 {
+            cpu.step(false);
+        }
+        cpu.bus.joypad.set_a_pressed(false);
+    }
 
     loop {
         cpu.step(debug);
@@ -144,7 +157,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     keycode: Some(DEBUG_KEYCODE),
                     repeat: false,
                     ..
-                } => debug = true,
+                } => {
+                    println!("debugging!");
+                    debug = true;
+                }
                 Event::KeyDown {
                     keycode: Some(SAVE_KEYCODE),
                     repeat: false,
