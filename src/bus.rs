@@ -15,6 +15,7 @@ pub enum InterruptType {
     Joypad,
 }
 
+#[derive(Clone)]
 pub struct Bus {
     interrupt_enable: u8,
     interrupt_flag: u8,
@@ -114,6 +115,9 @@ impl Bus {
             0xFEA0..=0xFEFF => 0x00, // unusable memory, read returns garbage
             0xFF00 => self.joypad.read(),
             0xFF04 => self.timer.get_divider_register(),
+            0xFF05 => self.timer.get_timer_counter(),
+            0xFF06 => self.timer.get_timer_modulo(),
+            0xFF07 => self.timer.get_timer_control(),
             0xFF0F => self.interrupt_flag,
             0xFF10 => {
                 eprintln!("reading from unimplemented NR10");
@@ -216,10 +220,7 @@ impl Bus {
             }
             0xFF80..=0xFFFE => self.high_ram[usize::from(address - 0xFF80)],
             0xFFFF => self.interrupt_enable,
-            _ => {
-                eprintln!("read from 0x{:02X}", address);
-                0
-            }
+            _ => todo!("read from 0x{:02X}", address),
         }
     }
 
@@ -303,7 +304,7 @@ impl Bus {
                 self.high_ram[usize::from(address - 0xFF80)] = value;
             }
             0xFFFF => self.interrupt_enable = value & 0b0001_1111,
-            _ => eprintln!("unknown write of 0x{:02X} to 0x{:02X}", value, address),
+            _ => todo!("write of 0x{:02X} to 0x{:02X}", value, address),
         }
     }
 

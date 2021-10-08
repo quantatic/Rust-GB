@@ -17,7 +17,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../tetris.gb");
+const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -33,10 +33,15 @@ const SELECT_KEYCODE: Keycode = Keycode::RShift;
 const A_KEYCODE: Keycode = Keycode::Z;
 const B_KEYCODE: Keycode = Keycode::X;
 
+const DEBUG_KEYCODE: Keycode = Keycode::D;
+const SAVE_KEYCODE: Keycode = Keycode::S;
+const LOAD_KEYCODE: Keycode = Keycode::L;
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
     let cartridge = Cartridge::new(ROM)?;
     let mut cpu = Cpu::new(cartridge);
+    let mut save_state = cpu.clone();
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -58,8 +63,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     canvas.present();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
+    let mut debug = false;
+
     loop {
-        cpu.step(false);
+        cpu.step(debug);
         if cpu.bus.ppu.should_print() {
             for (y, row) in cpu.bus.ppu.get_buffer().iter().enumerate() {
                 for (x, pixel) in row.iter().cloned().enumerate() {
@@ -133,6 +140,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                     repeat: false,
                     ..
                 } => cpu.bus.joypad.set_b_pressed(true),
+                Event::KeyDown {
+                    keycode: Some(DEBUG_KEYCODE),
+                    repeat: false,
+                    ..
+                } => debug = true,
+                Event::KeyDown {
+                    keycode: Some(SAVE_KEYCODE),
+                    repeat: false,
+                    ..
+                } => save_state = cpu.clone(),
+                Event::KeyDown {
+                    keycode: Some(LOAD_KEYCODE),
+                    repeat: false,
+                    ..
+                } => cpu = save_state.clone(),
+
                 Event::KeyUp {
                     keycode: Some(UP_KEYCODE),
                     repeat: false,
@@ -173,6 +196,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     repeat: false,
                     ..
                 } => cpu.bus.joypad.set_b_pressed(false),
+                Event::KeyUp {
+                    keycode: Some(DEBUG_KEYCODE),
+                    repeat: false,
+                    ..
+                } => debug = false,
                 _ => {}
             }
         }

@@ -1,4 +1,4 @@
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Joypad {
     action_buttons_selected: bool,
     direction_buttons_selected: bool,

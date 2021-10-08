@@ -5,6 +5,7 @@ use crate::{
     cartridge::Cartridge,
 };
 
+#[derive(Clone)]
 pub struct Cpu {
     af: u16,
     bc: u16,

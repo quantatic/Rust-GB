@@ -1,3 +1,4 @@
+#[derive(Clone, Copy, Debug)]
 enum TimerControlCpuDivide {
     Divide16,
     Divide64,
@@ -5,6 +6,7 @@ enum TimerControlCpuDivide {
     Divide1024,
 }
 
+#[derive(Clone)]
 pub struct Timer {
     divider: u8,
     timer_counter: u8,

@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 use std::default::Default;
 
+#[derive(Clone, Copy, Debug)]
 enum PpuMode {
     HBlank,
     VBlank,
@@ -8,6 +9,7 @@ enum PpuMode {
     PixelTransfer,
 }
 
+#[derive(Clone, Copy, Debug)]
 enum StatInterruptSource {
     LycEqualsLy,
     OAMSearch,
@@ -53,6 +55,7 @@ impl SpriteAttributeInfo {
     }
 }
 
+#[derive(Clone)]
 pub struct Ppu {
     character_ram: [u8; 0x1800],
     bg_map_data_1: [u8; 0x400],
@@ -147,32 +150,75 @@ impl Ppu {
             let buffer_x = u8::try_from(self.dot - 80).unwrap();
             let buffer_y = self.lcd_y;
 
-            let render_x = u16::from(buffer_x.wrapping_add(self.scroll_x));
-            let render_y = u16::from(buffer_y.wrapping_add(self.scroll_y));
-
             if buffer_x < 160 {
-                let tile_x = render_x / 8;
-                let tile_y = render_y / 8;
-                let tile_idx = tile_x + (tile_y * 32);
+                let mut non_zero_bg_window_pixel_drawn = false;
 
-                let tile_id = self.get_bg_tile_map(tile_idx);
-                let tile_data = self.get_bg_window_tile_data(tile_id);
+                if self.get_bg_window_enable() {
+                    let bg_render_x = u16::from(buffer_x.wrapping_add(self.scroll_x));
+                    let bg_render_y = u16::from(buffer_y.wrapping_add(self.scroll_y));
 
-                let tile_row = render_y % 8;
-                let lsb_row_color = tile_data[usize::from(tile_row) * 2];
-                let msb_row_color = tile_data[(usize::from(tile_row) * 2) + 1];
+                    let bg_tile_x = bg_render_x / 8;
+                    let bg_tile_y = bg_render_y / 8;
+                    let bg_tile_idx = bg_tile_x + (bg_tile_y * 32);
 
-                let tile_col = render_x % 8;
-                let lsb_pixel_color = (lsb_row_color & (1 << (7 - tile_col))) != 0;
-                let msb_pixel_color = (msb_row_color & (1 << (7 - tile_col))) != 0;
-                let pixel_palette_idx =
-                    (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
+                    let bg_tile_id = self.get_bg_tile_map(bg_tile_idx);
+                    let bg_tile_data = self.get_bg_window_tile_data(bg_tile_id);
 
-                let pixel_color = self.bg_palette[pixel_palette_idx];
-                self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
+                    let bg_tile_row = bg_render_y % 8;
+                    let bg_lsb_row_color = bg_tile_data[usize::from(bg_tile_row) * 2];
+                    let bg_msb_row_color = bg_tile_data[(usize::from(bg_tile_row) * 2) + 1];
+
+                    let bg_tile_col = bg_render_x % 8;
+                    let bg_lsb_pixel_color = (bg_lsb_row_color & (1 << (7 - bg_tile_col))) != 0;
+                    let bg_msb_pixel_color = (bg_msb_row_color & (1 << (7 - bg_tile_col))) != 0;
+                    let bg_pixel_palette_idx =
+                        (usize::from(bg_msb_pixel_color) << 1) | usize::from(bg_lsb_pixel_color);
+
+                    let bg_pixel_color = self.bg_palette[bg_pixel_palette_idx];
+
+                    self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = bg_pixel_color;
+
+                    non_zero_bg_window_pixel_drawn |= bg_pixel_palette_idx != 0;
+
+                    if self.get_window_enable()
+                        && self.window_y <= buffer_y
+                        && self.window_x <= buffer_x + 7
+                    {
+                        let window_render_x = u16::from(buffer_x + 7 - self.window_x);
+                        let window_render_y = u16::from(buffer_y - self.window_y);
+
+                        let window_tile_x = window_render_x / 8;
+                        let window_tile_y = window_render_y / 8;
+                        let window_tile_idx = window_tile_x + (window_tile_y * 32);
+
+                        let window_tile_id = self.get_window_tile_map(window_tile_idx);
+                        let window_tile_data = self.get_bg_window_tile_data(window_tile_id);
+
+                        let window_tile_row = window_render_y % 8;
+                        let window_lsb_row_color =
+                            window_tile_data[usize::from(window_tile_row) * 2];
+                        let window_msb_row_color =
+                            window_tile_data[(usize::from(window_tile_row) * 2) + 1];
+
+                        let window_tile_col = window_render_x % 8;
+                        let window_lsb_pixel_color =
+                            (window_lsb_row_color & (1 << (7 - window_tile_col))) != 0;
+                        let window_msb_pixel_color =
+                            (window_msb_row_color & (1 << (7 - window_tile_col))) != 0;
+                        let window_pixel_palette_idx = (usize::from(window_msb_pixel_color) << 1)
+                            | usize::from(window_lsb_pixel_color);
+
+                        let window_pixel_color = self.bg_palette[window_pixel_palette_idx];
+
+                        self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] =
+                            window_pixel_color;
+
+                        non_zero_bg_window_pixel_drawn |= window_pixel_palette_idx != 0;
+                    }
+                }
 
                 for attribute_info in self.object_attributes {
-                    if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
+                    if attribute_info.get_bg_window_over_obj() && non_zero_bg_window_pixel_drawn {
                         continue;
                     }
 

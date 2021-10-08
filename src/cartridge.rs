@@ -1,5 +1,6 @@
 use std::{convert::TryInto, error::Error};
 
+#[derive(Clone)]
 pub enum Cartridge {
     NoMbc(NoMbc),
     Mbc1(Mbc1),
@@ -24,6 +25,7 @@ impl Cartridge {
     }
 }
 
+#[derive(Clone)]
 struct NoMbc {
     rom: Vec<u8>,
     ram: Box<[u8; 0x2000]>,
@@ -54,6 +56,7 @@ impl NoMbc {
     }
 }
 
+#[derive(Clone)]
 struct Mbc1 {
     rom: Vec<[u8; 0x4000]>,
     rom_bank: usize,
@@ -108,6 +111,7 @@ impl Mbc1 {
     }
 }
 
+#[derive(Clone)]
 struct Mbc3 {
     rom: Vec<[u8; 0x4000]>,
     rom_bank: usize,
