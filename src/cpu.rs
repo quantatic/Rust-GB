@@ -948,7 +948,15 @@ impl Cpu {
                     _ => unreachable!(),
                 };
 
-                let cycles = if target.is_indirect() { 16 } else { 8 };
+                let cycles = if target.is_indirect() {
+                    if matches!(instruction_type, InstructionType::Bit { .. }) {
+                        12
+                    } else {
+                        16
+                    }
+                } else {
+                    8
+                };
 
                 self.pc += 2;
                 Instruction {

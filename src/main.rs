@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
+const ROM: &[u8] = include_bytes!("../tests/instr_timing.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -66,17 +66,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut debug = false;
 
-    for _ in 0..104 {
-        for _ in 0..1_000_000 {
-            cpu.step(false);
-        }
-        cpu.bus.joypad.set_a_pressed(true);
+    // for _ in 0..104 {
+    //     for _ in 0..1_000_000 {
+    //         cpu.step(false);
+    //     }
+    //     cpu.bus.joypad.set_a_pressed(true);
 
-        for _ in 0..2_500_000 {
-            cpu.step(false);
-        }
-        cpu.bus.joypad.set_a_pressed(false);
-    }
+    //     for _ in 0..2_500_000 {
+    //         cpu.step(false);
+    //     }
+    //     cpu.bus.joypad.set_a_pressed(false);
+    // }
 
     loop {
         cpu.step(debug);
@@ -243,56 +243,61 @@ mod tests {
 
     #[test]
     fn test_01_special() {
-        test_rom_passed(include_bytes!("../01_special.gb"));
+        test_rom_passed(include_bytes!("../tests/01_special.gb"));
     }
 
     #[test]
     fn test_02_interrupts() {
-        test_rom_passed(include_bytes!("../02_interrupts.gb"));
+        test_rom_passed(include_bytes!("../tests/02_interrupts.gb"));
     }
 
     #[test]
     fn test_03_sp_hl() {
-        test_rom_passed(include_bytes!("../03_sp_hl.gb"));
+        test_rom_passed(include_bytes!("../tests/03_sp_hl.gb"));
     }
 
     #[test]
     fn test_04_op_r_imm() {
-        test_rom_passed(include_bytes!("../04_op_r_imm.gb"));
+        test_rom_passed(include_bytes!("../tests/04_op_r_imm.gb"));
     }
 
     #[test]
     fn test_05_op_rp() {
-        test_rom_passed(include_bytes!("../05_op_rp.gb"));
+        test_rom_passed(include_bytes!("../tests/05_op_rp.gb"));
     }
 
     #[test]
     fn test_06_ld_r_r() {
-        test_rom_passed(include_bytes!("../06_ld_r_r.gb"));
+        test_rom_passed(include_bytes!("../tests/06_ld_r_r.gb"));
     }
 
     #[test]
     fn test_07_jr_jp_call_ret_rst() {
-        test_rom_passed(include_bytes!("../07_jr_jp_call_ret_rst.gb"));
+        test_rom_passed(include_bytes!("../tests/07_jr_jp_call_ret_rst.gb"));
     }
 
     #[test]
     fn test_08_misc_instructions() {
-        test_rom_passed(include_bytes!("../08_misc_instructions.gb"));
+        test_rom_passed(include_bytes!("../tests/08_misc_instructions.gb"));
     }
 
     #[test]
     fn test_09_op_r_r() {
-        test_rom_passed(include_bytes!("../09_op_r_r.gb"));
+        test_rom_passed(include_bytes!("../tests/09_op_r_r.gb"));
     }
 
     #[test]
     fn test_10_bit_ops() {
-        test_rom_passed(include_bytes!("../10_bit_ops.gb"));
+        test_rom_passed(include_bytes!("../tests/10_bit_ops.gb"));
     }
 
     #[test]
     fn test_11_op_a_hl() {
-        test_rom_passed(include_bytes!("../11_op_a_hl.gb"));
+        test_rom_passed(include_bytes!("../tests/11_op_a_hl.gb"));
+    }
+
+    #[test]
+    fn test_instr_timing() {
+        test_rom_passed(include_bytes!("../tests/instr_timing.gb"))
     }
 }
