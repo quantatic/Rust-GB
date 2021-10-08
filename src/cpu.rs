@@ -63,7 +63,7 @@ pub enum InstructionType {
     },
     Call {
         address: u16,
-        taken_penalty: u16,
+        taken_penalty: u8,
         condition: BranchConditionType,
     },
     Ccf,
@@ -89,12 +89,12 @@ pub enum InstructionType {
     },
     Jp {
         target: AddressingModeWord,
-        taken_penalty: u16,
+        taken_penalty: u8,
         condition: BranchConditionType,
     },
     Jr {
         offset: i8,
-        taken_penalty: u16,
+        taken_penalty: u8,
         condition: BranchConditionType,
     },
     LdByte {
@@ -124,7 +124,7 @@ pub enum InstructionType {
         bit: u8,
     },
     Ret {
-        taken_penalty: u16,
+        taken_penalty: u8,
         condition: BranchConditionType,
     },
     Reti,
@@ -291,12 +291,11 @@ impl Cpu {
                 if log {
                     println!("{:#x?}", decoded);
                 }
-                self.execute(decoded);
+                self.cycles_delay = self.execute(decoded);
                 if log {
                     println!("{:#x?}", self);
                     println!("----------------");
                 }
-                self.cycles_delay = decoded.cycles;
             }
         }
 
@@ -1134,8 +1133,8 @@ impl Cpu {
         }
     }
 
-    fn execute(&mut self, instruction: Instruction) {
-        match instruction.instruction_type {
+    fn execute(&mut self, instruction: Instruction) -> u8 {
+        let branch_penalty = match instruction.instruction_type {
             InstructionType::AddByte {
                 source,
                 destination,
@@ -1152,28 +1151,28 @@ impl Cpu {
                 address,
                 taken_penalty,
                 condition,
-            } => self.execute_call(address, condition),
+            } => self.execute_call(address, condition, taken_penalty),
             InstructionType::Ccf => self.execute_ccf(),
             InstructionType::Cp { source } => self.execute_cp(source),
             InstructionType::Cpl => self.execute_cpl(),
             InstructionType::Daa => self.execute_daa(),
             InstructionType::DecByte { target } => self.execute_dec_byte(target),
             InstructionType::DecWord { target } => self.execute_dec_word(target),
-            InstructionType::Di => self.bus.set_interrupt_master_enable(false),
-            InstructionType::Ei => self.bus.set_interrupt_master_enable(true),
-            InstructionType::Halt => self.halted = true,
+            InstructionType::Di => self.execute_di(),
+            InstructionType::Ei => self.execute_ei(),
+            InstructionType::Halt => self.execute_halt(),
             InstructionType::IncByte { target } => self.execute_inc_byte(target),
             InstructionType::IncWord { target } => self.execute_inc_word(target),
             InstructionType::Jp {
                 target,
                 taken_penalty,
                 condition,
-            } => self.execute_jp(target, condition),
+            } => self.execute_jp(target, condition, taken_penalty),
             InstructionType::Jr {
                 offset,
                 taken_penalty,
                 condition,
-            } => self.execute_jr(offset, condition),
+            } => self.execute_jr(offset, condition, taken_penalty),
             InstructionType::LdByte {
                 source,
                 destination,
@@ -1183,7 +1182,7 @@ impl Cpu {
                 destination,
             } => self.execute_ld_word(source, destination),
             InstructionType::Ldhl { source, offset } => self.execute_ldhl(source, offset),
-            InstructionType::Nop => {}
+            InstructionType::Nop => 0,
             InstructionType::Or { source } => self.execute_or(source),
             InstructionType::Pop { target } => self.execute_pop(target),
             InstructionType::Push { source } => self.execute_push(source),
@@ -1191,7 +1190,7 @@ impl Cpu {
             InstructionType::Ret {
                 taken_penalty,
                 condition,
-            } => self.execute_ret(condition),
+            } => self.execute_ret(condition, taken_penalty),
             InstructionType::Reti => self.execute_reti(),
             InstructionType::Rl { target } => self.execute_rl(target),
             InstructionType::Rla => self.execute_rla(),
@@ -1216,6 +1215,8 @@ impl Cpu {
             InstructionType::Xor { source } => self.execute_xor(source),
             _ => unreachable!("don't know how to execute:\n{:#x?}", instruction),
         };
+
+        instruction.cycles + branch_penalty
     }
 
     fn handle_interrupt(&mut self, interrupt_type: InterruptType) {
@@ -1232,7 +1233,11 @@ impl Cpu {
 }
 
 impl Cpu {
-    fn execute_add_byte(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+    fn execute_add_byte(
+        &mut self,
+        source: AddressingModeByte,
+        destination: AddressingModeByte,
+    ) -> u8 {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(destination);
         let (result, carry_out) = destination_value.overflowing_add(source_value);
@@ -1244,9 +1249,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(half_carry);
         self.set_carry_flag(carry_out);
+
+        0
     }
 
-    fn execute_add_hl(&mut self, source: AddressingModeWord) {
+    fn execute_add_hl(&mut self, source: AddressingModeWord) -> u8 {
         let source_value = self.read_word(source);
         let destination_value = self.read_word(AddressingModeWord::Hl);
         let (result, carry_out) = destination_value.overflowing_add(source_value);
@@ -1260,9 +1267,11 @@ impl Cpu {
                 != 0,
         );
         self.set_carry_flag(carry_out);
+
+        0
     }
 
-    fn execute_add_sp(&mut self, value: i8) {
+    fn execute_add_sp(&mut self, value: i8) -> u8 {
         let destination_value = self.read_word(AddressingModeWord::Sp);
         let result = destination_value.wrapping_add(i16::from(value) as u16);
         self.write_word(result, AddressingModeWord::Sp);
@@ -1283,9 +1292,11 @@ impl Cpu {
         );
         let (_, carry_out) = (destination_value as u8).overflowing_add(value as u8);
         self.set_carry_flag(carry_out);
+
+        0
     }
 
-    fn execute_adc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+    fn execute_adc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(destination);
         let (result, half_carry, carry) = if self.get_carry_flag() {
@@ -1312,9 +1323,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(half_carry);
         self.set_carry_flag(carry);
+
+        0
     }
 
-    fn execute_and(&mut self, source: AddressingModeByte) {
+    fn execute_and(&mut self, source: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source) as u8;
         let destination_value = self.read_byte(AddressingModeByte::Accumulator) & source_value;
         self.write_byte(destination_value, AddressingModeByte::Accumulator);
@@ -1323,25 +1336,38 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(true);
         self.set_carry_flag(false);
+
+        0
     }
 
-    fn execute_bit(&mut self, target: AddressingModeByte, bit: u8) {
+    fn execute_bit(&mut self, target: AddressingModeByte, bit: u8) -> u8 {
         let source_value = self.read_byte(target);
 
         self.set_zero_flag((source_value & (1 << bit)) == 0);
         self.set_subtract_flag(false);
         self.set_half_carry_flag(true);
+
+        0
     }
 
-    fn execute_call(&mut self, address: u16, condition: BranchConditionType) {
+    fn execute_call(
+        &mut self,
+        address: u16,
+        condition: BranchConditionType,
+        branch_penalty: u8,
+    ) -> u8 {
         if self.should_branch(condition) {
             self.sp -= 2;
             self.bus.write_word_address(self.pc, self.sp);
             self.pc = address;
+
+            branch_penalty
+        } else {
+            0
         }
     }
 
-    fn execute_inc_byte(&mut self, target: AddressingModeByte) {
+    fn execute_inc_byte(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = old_value.wrapping_add(1);
         self.write_byte(new_value, target);
@@ -1349,24 +1375,30 @@ impl Cpu {
         self.set_zero_flag(new_value == 0);
         self.set_subtract_flag(false);
         self.set_half_carry_flag((old_value & 0b0001_0000) != (new_value & 0b0001_0000));
+
+        0
     }
 
-    fn execute_inc_word(&mut self, target: AddressingModeWord) {
+    fn execute_inc_word(&mut self, target: AddressingModeWord) -> u8 {
         let old_value = self.read_word(target);
         let new_value = old_value.wrapping_add(1);
         self.write_word(new_value, target);
+
+        0
     }
 
-    fn execute_ccf(&mut self) {
+    fn execute_ccf(&mut self) -> u8 {
         let old_carry_flag = self.get_carry_flag();
         let new_carry_flag = !old_carry_flag;
 
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag(new_carry_flag);
+
+        0
     }
 
-    fn execute_cp(&mut self, source: AddressingModeByte) {
+    fn execute_cp(&mut self, source: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let accumulator_value = self.read_byte(AddressingModeByte::Accumulator);
 
@@ -1374,17 +1406,21 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag((accumulator_value & 0b0000_1111) < (source_value & 0b0000_1111));
         self.set_carry_flag(accumulator_value < source_value);
+
+        0
     }
 
-    fn execute_cpl(&mut self) {
+    fn execute_cpl(&mut self) -> u8 {
         let source_value = self.read_byte(AddressingModeByte::Accumulator);
         self.write_byte(!source_value, AddressingModeByte::Accumulator);
 
         self.set_subtract_flag(true);
         self.set_half_carry_flag(true);
+
+        0
     }
 
-    fn execute_daa(&mut self) {
+    fn execute_daa(&mut self) -> u8 {
         let source_value = self.read_byte(AddressingModeByte::Accumulator);
         let mut result_value = source_value;
 
@@ -1412,9 +1448,11 @@ impl Cpu {
         self.set_zero_flag(result_value == 0);
         self.set_half_carry_flag(false);
         // carry flag already (possibly) set above
+
+        0
     }
 
-    fn execute_dec_byte(&mut self, target: AddressingModeByte) {
+    fn execute_dec_byte(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = old_value.wrapping_sub(1);
         self.write_byte(new_value, target);
@@ -1422,25 +1460,59 @@ impl Cpu {
         self.set_zero_flag(new_value == 0);
         self.set_subtract_flag(true);
         self.set_half_carry_flag((old_value & 0b0001_0000) != (new_value & 0b0001_0000));
+
+        0
     }
 
-    fn execute_dec_word(&mut self, target: AddressingModeWord) {
+    fn execute_dec_word(&mut self, target: AddressingModeWord) -> u8 {
         let old_value = self.read_word(target);
         let new_value = old_value.wrapping_sub(1);
         self.write_word(new_value, target);
+
+        0
     }
 
-    fn execute_ld_byte(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+    fn execute_di(&mut self) -> u8 {
+        self.bus.set_interrupt_master_enable(false);
+
+        0
+    }
+
+    fn execute_ei(&mut self) -> u8 {
+        self.bus.set_interrupt_master_enable(true);
+
+        0
+    }
+
+    fn execute_halt(&mut self) -> u8 {
+        self.halted = true;
+
+        0
+    }
+
+    fn execute_ld_byte(
+        &mut self,
+        source: AddressingModeByte,
+        destination: AddressingModeByte,
+    ) -> u8 {
         let value = self.read_byte(source);
         self.write_byte(value, destination);
+
+        0
     }
 
-    fn execute_ld_word(&mut self, source: AddressingModeWord, destination: AddressingModeWord) {
+    fn execute_ld_word(
+        &mut self,
+        source: AddressingModeWord,
+        destination: AddressingModeWord,
+    ) -> u8 {
         let value = self.read_word(source);
         self.write_word(value, destination);
+
+        0
     }
 
-    fn execute_ldhl(&mut self, source: AddressingModeWord, offset: i8) {
+    fn execute_ldhl(&mut self, source: AddressingModeWord, offset: i8) -> u8 {
         let source_value = self.read_word(source);
         let result_value = source_value.wrapping_add(i16::from(offset) as u16);
         self.write_word(result_value, AddressingModeWord::Hl);
@@ -1460,24 +1532,39 @@ impl Cpu {
         );
         let (_, carry_out) = (source_value as u8).overflowing_add(offset as u8);
         self.set_carry_flag(carry_out);
+
+        0
     }
 
-    fn execute_jp(&mut self, target: AddressingModeWord, condition: BranchConditionType) {
+    fn execute_jp(
+        &mut self,
+        target: AddressingModeWord,
+        condition: BranchConditionType,
+        branch_penalty: u8,
+    ) -> u8 {
         if self.should_branch(condition) {
             self.pc = self.read_word(target);
+
+            branch_penalty
+        } else {
+            0
         }
     }
 
-    fn execute_jr(&mut self, offset: i8, condition: BranchConditionType) {
+    fn execute_jr(&mut self, offset: i8, condition: BranchConditionType, branch_penalty: u8) -> u8 {
         if self.should_branch(condition) {
             // Signed numbers are stored as 2's complement. Wrapping add after
             // casting to unsigned has same effect as wrapping add of signed to
             // unsigned.
             self.pc = self.pc.wrapping_add(offset as u16);
+
+            branch_penalty
+        } else {
+            0
         }
     }
 
-    fn execute_or(&mut self, source: AddressingModeByte) {
+    fn execute_or(&mut self, source: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(AddressingModeByte::Accumulator);
         let result_value = source_value | destination_value;
@@ -1487,42 +1574,56 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag(false);
+
+        0
     }
 
-    fn execute_pop(&mut self, target: AddressingModeWord) {
+    fn execute_pop(&mut self, target: AddressingModeWord) -> u8 {
         let value = self.bus.read_word_address(self.sp);
         self.sp += 2;
         self.write_word(value, target);
+
+        0
     }
 
-    fn execute_push(&mut self, source: AddressingModeWord) {
+    fn execute_push(&mut self, source: AddressingModeWord) -> u8 {
         let value = self.read_word(source);
         self.sp -= 2;
         self.bus.write_word_address(value, self.sp);
+
+        0
     }
 
-    fn execute_res(&mut self, target: AddressingModeByte, bit: u8) {
+    fn execute_res(&mut self, target: AddressingModeByte, bit: u8) -> u8 {
         let source_value = self.read_byte(target);
         let result_value = source_value & !(1 << bit);
         self.write_byte(result_value, target);
+
+        0
     }
 
-    fn execute_ret(&mut self, condition: BranchConditionType) {
+    fn execute_ret(&mut self, condition: BranchConditionType, branch_penalty: u8) -> u8 {
         if self.should_branch(condition) {
             let return_address = self.bus.read_word_address(self.sp);
             self.sp += 2;
             self.pc = return_address;
+
+            branch_penalty
+        } else {
+            0
         }
     }
 
-    fn execute_reti(&mut self) {
+    fn execute_reti(&mut self) -> u8 {
         let return_address = self.bus.read_word_address(self.sp);
         self.sp += 2;
         self.pc = return_address;
         self.bus.set_interrupt_master_enable(true);
+
+        0
     }
 
-    fn execute_rl(&mut self, target: AddressingModeByte) {
+    fn execute_rl(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = (old_value << 1) | (self.get_carry_flag() as u8);
         self.write_byte(new_value, target);
@@ -1531,9 +1632,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b1000_0000) != 0);
+
+        0
     }
 
-    fn execute_rla(&mut self) {
+    fn execute_rla(&mut self) -> u8 {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator = (old_accumulator << 1) | (self.get_carry_flag() as u8);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
@@ -1547,9 +1650,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
+
+        0
     }
 
-    fn execute_rlc(&mut self, target: AddressingModeByte) {
+    fn execute_rlc(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = old_value.rotate_left(1);
         self.write_byte(new_value, target);
@@ -1558,9 +1663,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b1000_0000) != 0);
+
+        0
     }
 
-    fn execute_rlca(&mut self) {
+    fn execute_rlca(&mut self) -> u8 {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator = old_accumulator.rotate_left(1);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
@@ -1574,9 +1681,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b1000_0000) != 0);
+
+        0
     }
 
-    fn execute_rr(&mut self, target: AddressingModeByte) {
+    fn execute_rr(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = (old_value >> 1) | (self.get_carry_flag() as u8).rotate_right(1);
         self.write_byte(new_value, target);
@@ -1585,9 +1694,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
+
+        0
     }
 
-    fn execute_rra(&mut self) {
+    fn execute_rra(&mut self) -> u8 {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator =
             (old_accumulator >> 1) | (self.get_carry_flag() as u8).rotate_right(1);
@@ -1602,9 +1713,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
+
+        0
     }
 
-    fn execute_rrc(&mut self, target: AddressingModeByte) {
+    fn execute_rrc(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let new_value = old_value.rotate_right(1);
         self.write_byte(new_value, target);
@@ -1613,9 +1726,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
+
+        0
     }
 
-    fn execute_rrca(&mut self) {
+    fn execute_rrca(&mut self) -> u8 {
         let old_accumulator = self.read_byte(AddressingModeByte::Accumulator);
         let new_accumulator = old_accumulator.rotate_right(1);
         self.write_byte(new_accumulator, AddressingModeByte::Accumulator);
@@ -1629,20 +1744,22 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_accumulator & 0b0000_0001) != 0);
+
+        0
     }
 
-    fn execute_rst(&mut self, offset: u16) {
+    fn execute_rst(&mut self, offset: u16) -> u8 {
         self.sp -= 2;
         self.bus.write_word_address(self.pc, self.sp);
         self.pc = offset;
 
-        // TODO: re-enable interrupts
+        0
     }
 
     // Some gameboy documentation has carry/half-carry documentation backwards for this op.
     // Carry and half-carry flags are set when there is a borrow-in to bit 7 for carry flag,
     // or borrow-in to bit 3 for half-carry flag, respectively.
-    fn execute_sbc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) {
+    fn execute_sbc(&mut self, source: AddressingModeByte, destination: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(destination);
 
@@ -1666,21 +1783,27 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag(half_carry);
         self.set_carry_flag(carry);
+
+        0
     }
 
-    fn execute_scf(&mut self) {
+    fn execute_scf(&mut self) -> u8 {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag(true);
+
+        0
     }
 
-    fn execute_set(&mut self, target: AddressingModeByte, bit: u8) {
+    fn execute_set(&mut self, target: AddressingModeByte, bit: u8) -> u8 {
         let old_value = self.read_byte(target);
         let result_value = old_value | (1 << bit);
         self.write_byte(result_value, target);
+
+        0
     }
 
-    fn execute_sla(&mut self, target: AddressingModeByte) {
+    fn execute_sla(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         let result_value = old_value << 1;
         self.write_byte(result_value, target);
@@ -1689,9 +1812,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b1000_0000) != 0);
+
+        0
     }
 
-    fn execute_sra(&mut self, target: AddressingModeByte) {
+    fn execute_sra(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         // Signed right shift performs sign extension.
         let result_value = ((old_value as i8) >> 1) as u8;
@@ -1701,9 +1826,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
+
+        0
     }
 
-    fn execute_srl(&mut self, target: AddressingModeByte) {
+    fn execute_srl(&mut self, target: AddressingModeByte) -> u8 {
         let old_value = self.read_byte(target);
         // Signed right shift performs sign extension.
         let result_value = old_value >> 1;
@@ -1713,12 +1840,14 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
+
+        0
     }
 
     // Some gameboy documentation has carry/half-carry documentation backwards for this op.
     // Carry and half-carry flags are set when there is a borrow-in to bit 7 for carry flag,
     // or borrow-in to bit 3 for half-carry flag, respectively.
-    fn execute_sub(&mut self, source: AddressingModeByte) {
+    fn execute_sub(&mut self, source: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let destination_value = self.read_byte(AddressingModeByte::Accumulator);
         let (result_value, carry_in) = destination_value.overflowing_sub(source_value);
@@ -1730,8 +1859,10 @@ impl Cpu {
         self.set_subtract_flag(true);
         self.set_half_carry_flag(half_carry_in);
         self.set_carry_flag(carry_in);
+
+        0
     }
-    fn execute_swap(&mut self, target: AddressingModeByte) {
+    fn execute_swap(&mut self, target: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(target);
         // Original low nibble will be shifted out when shifting right, and likewise,
         // original high nibble will be shifted out when shifting left.
@@ -1742,9 +1873,11 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag(false);
+
+        0
     }
 
-    fn execute_xor(&mut self, source: AddressingModeByte) {
+    fn execute_xor(&mut self, source: AddressingModeByte) -> u8 {
         let source_value = self.read_byte(source);
         let result_value = self.read_byte(AddressingModeByte::Accumulator) ^ source_value;
         self.write_byte(result_value, AddressingModeByte::Accumulator);
@@ -1753,6 +1886,8 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag(false);
+
+        0
     }
 
     fn should_branch(&self, condition: BranchConditionType) -> bool {

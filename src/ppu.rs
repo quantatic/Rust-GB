@@ -173,9 +173,9 @@ impl Ppu {
 
                 for attribute_info in self.object_attributes {
                     if buffer_y + 16 >= attribute_info.y_position
-                        && buffer_y + 16 < attribute_info.y_position + 8
+                        && buffer_y + 8 < attribute_info.y_position
                         && buffer_x + 8 >= attribute_info.x_position
-                        && buffer_x + 8 < attribute_info.x_position + 8
+                        && buffer_x < attribute_info.x_position
                     {
                         if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
                             continue;
@@ -193,7 +193,57 @@ impl Ppu {
                             buffer_x + 8 - attribute_info.x_position
                         };
 
-                        let sprite_data = self.get_obj_tile_data(attribute_info.tile_index);
+                        let sprite_data = match self.get_obj_size() {
+                            ObjSize::EightByEight => {
+                                self.get_obj_tile_data(attribute_info.tile_index)
+                            }
+                            ObjSize::EightBySixteen => {
+                                self.get_obj_tile_data(attribute_info.tile_index & (!0x01))
+                            }
+                        };
+                        let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
+                        let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
+
+                        let lsb_pixel_color = (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                        let msb_pixel_color = (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                        let pixel_palette_idx =
+                            (usize::from(msb_pixel_color) << 1) | usize::from(lsb_pixel_color);
+
+                        if pixel_palette_idx != 0 {
+                            let pixel_color = if attribute_info.use_low_palette() {
+                                self.obj_palette_2[pixel_palette_idx]
+                            } else {
+                                self.obj_palette_1[pixel_palette_idx]
+                            };
+
+                            self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
+
+                            break;
+                        }
+                    } else if matches!(self.get_obj_size(), ObjSize::EightBySixteen)
+                        && buffer_y + 8 >= attribute_info.y_position
+                        && buffer_y < attribute_info.y_position
+                        && buffer_x + 8 >= attribute_info.x_position
+                        && buffer_x < attribute_info.x_position
+                    {
+                        if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
+                            continue;
+                        }
+
+                        let sprite_y_offset = if attribute_info.get_y_flip() {
+                            7 - (buffer_y + 8 - attribute_info.y_position)
+                        } else {
+                            buffer_y + 8 - attribute_info.y_position
+                        };
+
+                        let sprite_x_offset = if attribute_info.get_x_flip() {
+                            7 - (buffer_x + 8 - attribute_info.x_position)
+                        } else {
+                            buffer_x + 8 - attribute_info.x_position
+                        };
+
+                        let sprite_data = self.get_obj_tile_data(attribute_info.tile_index | 0x01);
                         let lsb_row_color = sprite_data[usize::from(sprite_y_offset) * 2];
                         let msb_row_color = sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
 
@@ -324,7 +374,6 @@ impl Ppu {
 
     pub fn write_lcd_control(&mut self, data: u8) {
         self.lcd_control = data;
-        assert!(matches!(self.get_obj_size(), ObjSize::EightByEight));
     }
 
     fn get_lcd_ppu_enable(&self) -> bool {

@@ -17,7 +17,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
+const ROM: &[u8] = include_bytes!("../tetris.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -57,6 +57,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     canvas.clear();
     canvas.present();
     let mut event_pump = sdl_context.event_pump().unwrap();
+    for _ in 0..40_000_000 {
+        cpu.step(false);
+    }
+
     loop {
         cpu.step(false);
         if cpu.bus.ppu.should_print() {

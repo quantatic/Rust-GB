@@ -1,7 +1,4 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    error::Error,
-};
+use std::{convert::TryInto, error::Error};
 
 pub enum Cartridge {
     NoMbc(NoMbc),
@@ -170,7 +167,7 @@ impl Mbc3 {
             0x0000..=0x1FFF => {} // RAM and timer enable
             0x2000..=0x3FFF => self.rom_bank = if value == 0 { 1 } else { usize::from(value) },
             0x4000..=0x5FFF => self.ram_bank = usize::from(value),
-            0x6000..=0x7FFF => todo!("latch clock data"),
+            0x6000..=0x7FFF => eprintln!("unimplemented latching clock data"),
             0xA000..=0xBFFF => match self.ram_bank {
                 0x00..=0x03 => self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value,
                 0x08 => self.rtc_secs = value,
