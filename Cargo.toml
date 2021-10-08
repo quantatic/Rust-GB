@@ -8,3 +8,10 @@ edition = "2018"
 
 [dependencies]
 sdl2 = "0.34.5"
+
+[profile.release]
+opt-level = 3
+debug = 2
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
