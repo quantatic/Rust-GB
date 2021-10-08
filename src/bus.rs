@@ -214,12 +214,12 @@ impl Bus {
                 eprintln!("reading from unimplemented KEY1");
                 0
             }
-            0xFF80..=0xFFFE => {
-                let ram_offset = address - 0xFF80;
-                self.high_ram[usize::from(ram_offset)]
-            }
+            0xFF80..=0xFFFE => self.high_ram[usize::from(address - 0xFF80)],
             0xFFFF => self.interrupt_enable,
-            _ => todo!("read from 0x{:02X}", address),
+            _ => {
+                eprintln!("read from 0x{:02X}", address);
+                0
+            }
         }
     }
 
@@ -251,7 +251,9 @@ impl Bus {
             0xFF05 => self.timer.set_timer_counter(value),
             0xFF06 => self.timer.set_timer_modulo(value),
             0xFF07 => self.timer.set_timer_control(value),
-            0xFF0F => self.interrupt_flag = value & 0b0001_1111,
+            0xFF0F => {
+                self.interrupt_flag = value & 0b0001_1111;
+            }
             0xFF10 => eprintln!("writing 0x{:02X} to unimplemented NR10", value),
             0xFF11 => eprintln!("writing 0x{:02X} to unimplemented NR11", value),
             0xFF12 => eprintln!("writing 0x{:02X} to unimplemented NR12", value),
@@ -298,8 +300,7 @@ impl Bus {
             0xFF4B => self.ppu.write_window_x(value),
             0xFF4D => eprintln!("writing 0x{:02X} to unimplemented KEY1", value),
             0xFF80..=0xFFFE => {
-                let ram_offset = address - 0xFF80;
-                self.high_ram[usize::from(ram_offset)] = value;
+                self.high_ram[usize::from(address - 0xFF80)] = value;
             }
             0xFFFF => self.interrupt_enable = value & 0b0001_1111,
             _ => eprintln!("unknown write of 0x{:02X} to 0x{:02X}", value, address),
@@ -315,7 +316,7 @@ impl Bus {
 
 impl Bus {
     const VBLANK_INTERRUPT_MASK: u8 = 0b0000_0001;
-    const LCD_STAT_INTERRUPT_MASK: u8 = 0b010_0010;
+    const LCD_STAT_INTERRUPT_MASK: u8 = 0b0000_0010;
     const TIMER_INTERRUPT_MASK: u8 = 0b0000_0100;
     const SERIAL_INTERRUPT_MASK: u8 = 0b0000_1000;
     const JOYPAD_INTERRUPT_MASK: u8 = 0b0001_0000;

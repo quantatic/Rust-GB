@@ -287,7 +287,7 @@ impl Cpu {
                 if log {
                     println!("{:#x?}", self);
                 }
-                let decoded = self.decode();
+                let decoded = self.decode(log);
                 if log {
                     println!("{:#x?}", decoded);
                 }
@@ -413,8 +413,11 @@ impl Cpu {
         }
     }
 
-    fn decode(&mut self) -> Instruction {
+    fn decode(&mut self, log: bool) -> Instruction {
         let opcode = self.bus.read_byte_address(self.pc);
+        if log {
+            println!("0x{:04X} -> 0x{:02X}", self.pc, opcode);
+        }
         match opcode {
             0x00 => {
                 self.pc += 1;

@@ -172,15 +172,15 @@ impl Ppu {
                 self.buffer[usize::from(buffer_y)][usize::from(buffer_x)] = pixel_color;
 
                 for attribute_info in self.object_attributes {
+                    if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
+                        continue;
+                    }
+
                     if buffer_y + 16 >= attribute_info.y_position
                         && buffer_y + 8 < attribute_info.y_position
                         && buffer_x + 8 >= attribute_info.x_position
                         && buffer_x < attribute_info.x_position
                     {
-                        if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
-                            continue;
-                        }
-
                         let sprite_y_offset = if attribute_info.get_y_flip() {
                             7 - (buffer_y + 16 - attribute_info.y_position)
                         } else {
@@ -227,10 +227,6 @@ impl Ppu {
                         && buffer_x + 8 >= attribute_info.x_position
                         && buffer_x < attribute_info.x_position
                     {
-                        if attribute_info.get_bg_window_over_obj() && pixel_palette_idx != 0 {
-                            continue;
-                        }
-
                         let sprite_y_offset = if attribute_info.get_y_flip() {
                             7 - (buffer_y + 8 - attribute_info.y_position)
                         } else {

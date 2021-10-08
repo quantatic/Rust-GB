@@ -57,9 +57,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     canvas.clear();
     canvas.present();
     let mut event_pump = sdl_context.event_pump().unwrap();
-    for _ in 0..40_000_000 {
-        cpu.step(false);
-    }
 
     loop {
         cpu.step(false);

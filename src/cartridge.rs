@@ -47,7 +47,7 @@ impl NoMbc {
 
     fn write(&mut self, value: u8, offset: u16) {
         match offset {
-            0x0000..=0x7FFF => self.rom[usize::from(offset)] = value,
+            0x0000..=0x7FFF => {} // writing to ROM does nothing with no MBC
             0xA000..=0xBFFF => self.ram[usize::from(offset - 0xA000)] = value,
             _ => unreachable!(),
         };
