@@ -199,6 +199,17 @@ impl BranchConditionType {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub enum RegisterByte {
+    Accumulator,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum AddressingModeByte {
     Accumulator,
     B,
@@ -303,6 +314,18 @@ impl Cpu {
         }
 
         self.cycles_delay -= 1;
+    }
+
+    pub fn read_register(&self, register: RegisterByte) -> u8 {
+        match register {
+            RegisterByte::Accumulator => (self.af >> 8) as u8,
+            RegisterByte::B => (self.bc >> 8) as u8,
+            RegisterByte::C => self.bc as u8,
+            RegisterByte::D => (self.de >> 8) as u8,
+            RegisterByte::E => self.de as u8,
+            RegisterByte::H => (self.hl >> 8) as u8,
+            RegisterByte::L => self.hl as u8,
+        }
     }
 
     fn read_byte(&mut self, location: AddressingModeByte) -> u8 {

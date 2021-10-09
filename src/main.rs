@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../tests/instr_timing.gb");
+const ROM: &[u8] = include_bytes!("../tests/rtc3_test.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -227,13 +227,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
+    use crate::cpu::AddressingModeByte;
+
     use super::*;
 
-    fn test_rom_passed(rom: &[u8]) {
+    fn test_blaarg_rom_passed(rom: &[u8]) {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
-        for _ in 0..100_000_000 {
+        for _ in 0..75_000_000 {
             cpu.step(false);
         }
 
@@ -241,63 +243,100 @@ mod tests {
         assert!(serial_out.contains("Passed"));
     }
 
+    fn test_mooneye_rom_passed(rom: &[u8]) {
+        let cartridge = Cartridge::new(rom).unwrap();
+        let mut cpu = Cpu::new(cartridge);
+
+        for _ in 0..50_000_000 {
+            cpu.step(false);
+        }
+
+        assert_eq!(cpu.read_register(cpu::RegisterByte::B), 03);
+        assert_eq!(cpu.read_register(cpu::RegisterByte::C), 05);
+        assert_eq!(cpu.read_register(cpu::RegisterByte::D), 08);
+        assert_eq!(cpu.read_register(cpu::RegisterByte::E), 13);
+        assert_eq!(cpu.read_register(cpu::RegisterByte::H), 21);
+        assert_eq!(cpu.read_register(cpu::RegisterByte::L), 34);
+    }
+
     #[test]
     fn test_01_special() {
-        test_rom_passed(include_bytes!("../tests/01_special.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/01_special.gb"));
     }
 
     #[test]
     fn test_02_interrupts() {
-        test_rom_passed(include_bytes!("../tests/02_interrupts.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/02_interrupts.gb"));
     }
 
     #[test]
     fn test_03_sp_hl() {
-        test_rom_passed(include_bytes!("../tests/03_sp_hl.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/03_sp_hl.gb"));
     }
 
     #[test]
     fn test_04_op_r_imm() {
-        test_rom_passed(include_bytes!("../tests/04_op_r_imm.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/04_op_r_imm.gb"));
     }
 
     #[test]
     fn test_05_op_rp() {
-        test_rom_passed(include_bytes!("../tests/05_op_rp.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/05_op_rp.gb"));
     }
 
     #[test]
     fn test_06_ld_r_r() {
-        test_rom_passed(include_bytes!("../tests/06_ld_r_r.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/06_ld_r_r.gb"));
     }
 
     #[test]
     fn test_07_jr_jp_call_ret_rst() {
-        test_rom_passed(include_bytes!("../tests/07_jr_jp_call_ret_rst.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/07_jr_jp_call_ret_rst.gb"));
     }
 
     #[test]
     fn test_08_misc_instructions() {
-        test_rom_passed(include_bytes!("../tests/08_misc_instructions.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/08_misc_instructions.gb"));
     }
 
     #[test]
     fn test_09_op_r_r() {
-        test_rom_passed(include_bytes!("../tests/09_op_r_r.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/09_op_r_r.gb"));
     }
 
     #[test]
     fn test_10_bit_ops() {
-        test_rom_passed(include_bytes!("../tests/10_bit_ops.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/10_bit_ops.gb"));
     }
 
     #[test]
     fn test_11_op_a_hl() {
-        test_rom_passed(include_bytes!("../tests/11_op_a_hl.gb"));
+        test_blaarg_rom_passed(include_bytes!("../tests/11_op_a_hl.gb"));
     }
 
     #[test]
     fn test_instr_timing() {
-        test_rom_passed(include_bytes!("../tests/instr_timing.gb"))
+        test_blaarg_rom_passed(include_bytes!("../tests/instr_timing.gb"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_interrupt_time() {
+        test_blaarg_rom_passed(include_bytes!("../tests/interrupt_time.gb"));
+    }
+
+    #[test]
+    fn test_mooneye_daa() {
+        test_mooneye_rom_passed(include_bytes!("../tests/daa.gb"));
+    }
+
+    #[test]
+    fn test_bits_bank_1() {
+        test_mooneye_rom_passed(include_bytes!("../tests/bits_bank1.gb"));
+    }
+
+    #[test]
+    fn test_bits_bank_2() {
+        test_mooneye_rom_passed(include_bytes!("../tests/bits_bank2.gb"));
     }
 }

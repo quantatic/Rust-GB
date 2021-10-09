@@ -101,6 +101,7 @@ impl Bus {
             self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
         }
 
+        self.cartridge.step();
         self.timer.step();
         self.ppu.step();
     }
