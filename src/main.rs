@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../tests/rtc3_test.gb");
+const ROM: &[u8] = include_bytes!("../tests/dmg_acid2.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut debug = false;
 
-    // for _ in 0..104 {
+    // for _ in 0..105 {
     //     for _ in 0..1_000_000 {
     //         cpu.step(false);
     //     }
