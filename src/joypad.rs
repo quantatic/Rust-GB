@@ -23,34 +23,66 @@ impl Joypad {
 
     pub fn set_up_pressed(&mut self, val: bool) {
         self.up_pressed = val;
+
+        if val && self.direction_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_down_pressed(&mut self, val: bool) {
         self.down_pressed = val;
+
+        if val && self.direction_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_left_pressed(&mut self, val: bool) {
         self.left_pressed = val;
+
+        if val && self.direction_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_right_pressed(&mut self, val: bool) {
         self.right_pressed = val;
+
+        if val && self.direction_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_start_pressed(&mut self, val: bool) {
         self.start_pressed = val;
+
+        if val && self.action_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_select_pressed(&mut self, val: bool) {
         self.select_pressed = val;
+
+        if val && self.action_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_b_pressed(&mut self, val: bool) {
         self.b_pressed = val;
+
+        if val && self.action_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn set_a_pressed(&mut self, val: bool) {
         self.a_pressed = val;
+
+        if val && self.action_buttons_selected {
+            self.interrupt_waiting = true;
+        }
     }
 
     pub fn poll_interrupt(&mut self) -> bool {

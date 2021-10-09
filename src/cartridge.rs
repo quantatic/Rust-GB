@@ -1,7 +1,12 @@
 use std::{convert::TryInto, error::Error};
 
 #[derive(Clone)]
-pub enum Cartridge {
+pub struct Cartridge {
+    cartridge_type: CartridgeType,
+}
+
+#[derive(Clone)]
+enum CartridgeType {
     NoMbc(NoMbc),
     Mbc1(Mbc1),
     Mbc3(Mbc3),
@@ -9,18 +14,18 @@ pub enum Cartridge {
 
 impl Cartridge {
     pub fn read(&self, offset: u16) -> u8 {
-        match self {
-            Cartridge::NoMbc(no_mbc) => no_mbc.read(offset),
-            Cartridge::Mbc1(mbc_1) => mbc_1.read(offset),
-            Cartridge::Mbc3(mbc_3) => mbc_3.read(offset),
+        match &self.cartridge_type {
+            CartridgeType::NoMbc(no_mbc) => no_mbc.read(offset),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.read(offset),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.read(offset),
         }
     }
 
     pub fn write(&mut self, value: u8, offset: u16) {
-        match self {
-            Cartridge::NoMbc(no_mbc) => no_mbc.write(value, offset),
-            Cartridge::Mbc1(mbc_1) => mbc_1.write(value, offset),
-            Cartridge::Mbc3(mbc_3) => mbc_3.write(value, offset),
+        match &mut self.cartridge_type {
+            CartridgeType::NoMbc(no_mbc) => no_mbc.write(value, offset),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.write(value, offset),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.write(value, offset),
         }
     }
 }
@@ -279,11 +284,15 @@ impl Cartridge {
         let cartridge_type_code = data[0x147];
         println!("cartridge type code: ${:02X}", cartridge_type_code);
 
-        match cartridge_type_code {
-            0x00 => Ok(Cartridge::NoMbc(NoMbc::new(data))),
-            0x01 | 0x02 | 0x03 => Ok(Cartridge::Mbc1(Mbc1::new(data)?)),
-            0x11 | 0x12 | 0x13 => Ok(Cartridge::Mbc3(Mbc3::new(data)?)),
+        let cartridge_impl = match cartridge_type_code {
+            0x00 => CartridgeType::NoMbc(NoMbc::new(data)),
+            0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data)?),
+            0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data)?),
             _ => todo!(),
-        }
+        };
+
+        Ok(Cartridge {
+            cartridge_type: cartridge_impl,
+        })
     }
 }
