@@ -1250,7 +1250,6 @@ impl Cpu {
             InstructionType::Sub { source } => self.execute_sub(source),
             InstructionType::Swap { target } => self.execute_swap(target),
             InstructionType::Xor { source } => self.execute_xor(source),
-            _ => unreachable!("don't know how to execute:\n{:#x?}", instruction),
         };
 
         instruction.cycles + branch_penalty

@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
+const ROM: &[u8] = include_bytes!("../super_mario_land_2.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -330,13 +330,63 @@ mod tests {
     }
 
     #[test]
-    fn test_bits_bank_1() {
-        test_mooneye_rom_passed(include_bytes!("../tests/bits_bank1.gb"));
+    fn test_mbc1_bits_bank_1() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_bits_bank1.gb"));
     }
 
     #[test]
-    fn test_bits_bank_2() {
-        test_mooneye_rom_passed(include_bytes!("../tests/bits_bank2.gb"));
+    fn test_mbc1_bits_bank_2() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_bits_bank2.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_bits_mode() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_bits_mode.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_bits_ramg() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_bits_ramg.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_ram_64kb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_ram_64kb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_ram_256kb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_ram_256kb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_512kb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_512kb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_1mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_1mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_2mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_2mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_4mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_4mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_8mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_8mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc1_rom_16mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_16mb.gb"));
     }
 
     #[test]

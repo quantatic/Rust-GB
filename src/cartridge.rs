@@ -47,21 +47,33 @@ impl Cartridge {
 #[derive(Clone)]
 struct NoMbc {
     rom: Vec<u8>,
-    ram: Box<[u8; 0x2000]>,
+    ram: Vec<[u8; 0x2000]>,
 }
 
 impl NoMbc {
-    fn new(data: &[u8]) -> Self {
-        Self {
+    fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
+        let ram = if ram_size == 0x0000 {
+            Vec::new()
+        } else if ram_size == 0x2000 {
+            vec![[0; 0x2000]]
+        } else {
+            return Err(format!(
+                "expected ram size of 0x0000 or 0x2000, but got 0x{:04X}",
+                ram_size
+            )
+            .into());
+        };
+
+        Ok(Self {
             rom: data.to_vec(),
-            ram: Box::new([0; 0x2000]),
-        }
+            ram,
+        })
     }
 
     fn read(&self, offset: u16) -> u8 {
         match offset {
             0x0000..=0x7FFF => self.rom[usize::from(offset)],
-            0xA000..=0xBFFF => self.ram[usize::from(offset - 0xA000)],
+            0xA000..=0xBFFF => self.ram[0][usize::from(offset - 0xA000)],
             _ => unreachable!(),
         }
     }
@@ -69,60 +81,79 @@ impl NoMbc {
     fn write(&mut self, value: u8, offset: u16) {
         match offset {
             0x0000..=0x7FFF => {} // writing to ROM does nothing with no MBC
-            0xA000..=0xBFFF => self.ram[usize::from(offset - 0xA000)] = value,
+            0xA000..=0xBFFF => self.ram[0][usize::from(offset - 0xA000)] = value,
             _ => unreachable!(),
         };
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Mbc1Type {
+    LargeRom,
+    LargeRam,
+}
+
 #[derive(Clone)]
 struct Mbc1 {
     rom: Vec<[u8; 0x4000]>,
-    rom_bank: usize,
+    rom_banks: usize,
+    bank_1: usize,
     ram: Vec<[u8; 0x2000]>,
-    extra_bank: usize,
+    ram_banks: usize,
+    bank_2: usize,
     ram_enabled: bool,
-    extra_rom_banking: bool,
+    simple_rom_banking: bool,
 }
 
 impl Mbc1 {
-    fn new(data: &[u8]) -> Result<Self, Box<dyn Error>> {
-        let rom = data
+    fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
+        if ram_size % 0x2000 != 0 {
+            return Err(format!(
+                "expected ram size to be divisible by 0x2000, but got 0x{:04X}",
+                ram_size
+            )
+            .into());
+        }
+
+        let rom: Vec<[u8; 0x4000]> = data
             .chunks(0x4000)
             .map(<[u8; 0x4000]>::try_from)
             .collect::<Result<_, _>>()?;
 
-        let ram = data
-            .chunks(0x2000)
-            .map(<[u8; 0x2000]>::try_from)
-            .collect::<Result<_, _>>()?;
+        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_size / 0x2000];
 
         Ok(Self {
+            rom_banks: rom.len(),
             rom,
-            rom_bank: 1,
+            bank_1: 1,
+            ram_banks: ram.len(),
             ram,
-            extra_bank: 0,
+            bank_2: 0,
             ram_enabled: false,
-            extra_rom_banking: false,
+            simple_rom_banking: true,
         })
     }
 
     fn read(&self, offset: u16) -> u8 {
         match offset {
-            0x0000..=0x3FFF => self.rom[0][usize::from(offset)],
-            0x4000..=0x7FFF => {
-                if self.extra_rom_banking {
-                    self.rom[self.rom_bank | (self.extra_bank << 5)][usize::from(offset - 0x4000)]
+            0x0000..=0x3FFF => {
+                let bank_number = if self.simple_rom_banking {
+                    0
                 } else {
-                    self.rom[self.rom_bank][usize::from(offset - 0x4000)]
-                }
+                    self.bank_2 << 5
+                };
+                self.rom[bank_number % self.rom_banks][usize::from(offset)]
+            }
+            0x4000..=0x7FFF => {
+                let bank_number = self.bank_1 | (self.bank_2 << 5);
+                self.rom[bank_number % self.rom_banks][usize::from(offset - 0x4000)]
             }
             0xA000..=0xBFFF => {
                 if self.ram_enabled {
-                    if self.extra_rom_banking {
+                    if self.simple_rom_banking {
                         self.ram[0][usize::from(offset - 0xA000)]
                     } else {
-                        self.ram[self.extra_bank][usize::from(offset - 0xA000)]
+                        self.ram[self.bank_2 % self.ram_banks][usize::from(offset - 0xA000)]
                     }
                 } else {
                     0xFF
@@ -134,26 +165,23 @@ impl Mbc1 {
 
     fn write(&mut self, value: u8, offset: u16) {
         match offset {
-            0x0000..=0x1FFF => self.ram_enabled = value != 0,
+            0x0000..=0x1FFF => self.ram_enabled = (value & 0xF) == 0x0A,
             0x2000..=0x3FFF => {
-                self.rom_bank = if value == 0 {
-                    1
-                } else {
-                    usize::from(value) % self.rom.len()
+                self.bank_1 = usize::from(value) & 0b11111;
+                // Bank 1 is not allowed to contain the value 0
+                if self.bank_1 == 0 {
+                    self.bank_1 = 1;
                 }
             }
-            0x4000..=0x5FFF => self.extra_bank = usize::from(value & 0b11),
-            0x6000..=0x7FFF => match value {
-                0x00 => self.extra_rom_banking = true,
-                0x01 => self.extra_rom_banking = self.rom.len() * 0x4000 >= 0x100000, // extra rom banking only if "large rom", >= 1MB
-                _ => unreachable!(),
-            },
+            0x4000..=0x5FFF => self.bank_2 = usize::from(value & 0b11),
+            0x6000..=0x7FFF => self.simple_rom_banking = (value & 0b1) == 0,
             0xA000..=0xBFFF => {
                 if self.ram_enabled {
-                    if self.extra_rom_banking {
+                    if self.simple_rom_banking {
                         self.ram[0][usize::from(offset - 0xA000)] = value;
                     } else {
-                        self.ram[self.extra_bank][usize::from(offset - 0xA000)] = value;
+                        self.ram[self.bank_2 % self.ram_banks][usize::from(offset - 0xA000)] =
+                            value;
                     }
                 }
             }
@@ -392,6 +420,15 @@ impl Cartridge {
             .into());
         }
 
+        let ram_size = match data[0x149] {
+            0x00 | 0x01 => 0x00000,
+            0x02 => 0x02000,
+            0x03 => 0x08000,
+            0x04 => 0x20000,
+            0x05 => 0x10000,
+            _ => unreachable!(),
+        };
+
         let mut actual_header_checksum: u8 = 0;
         for byte in data[0x134..=0x14C].iter().copied() {
             actual_header_checksum = actual_header_checksum.wrapping_sub(byte).wrapping_sub(1);
@@ -432,8 +469,8 @@ impl Cartridge {
         println!("cartridge type code: ${:02X}", cartridge_type_code);
 
         let cartridge_impl = match cartridge_type_code {
-            0x00 => CartridgeType::NoMbc(NoMbc::new(data)),
-            0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data)?),
+            0x00 => CartridgeType::NoMbc(NoMbc::new(data, ram_size)?),
+            0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data, ram_size)?),
             0x0F | 0x10 | 0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data)?),
             _ => todo!(),
         };
