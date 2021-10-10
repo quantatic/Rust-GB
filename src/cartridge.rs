@@ -4,6 +4,7 @@ use std::{convert::TryInto, error::Error, time::Instant};
 #[derive(Clone)]
 pub struct Cartridge {
     cartridge_type: CartridgeType,
+    title: String,
 }
 
 #[derive(Clone)]
@@ -36,6 +37,10 @@ impl Cartridge {
             CartridgeType::Mbc1(mbc_1) => {}
             CartridgeType::Mbc3(mbc_3) => mbc_3.step(),
         }
+    }
+
+    pub fn get_title(&self) -> &str {
+        &self.title
     }
 }
 
@@ -417,6 +422,7 @@ impl Cartridge {
         let title: String = data[0x134..=0x143]
             .iter()
             .copied()
+            .take_while(|val| *val != 0)
             .map(char::from)
             .collect();
 
@@ -434,6 +440,7 @@ impl Cartridge {
 
         Ok(Cartridge {
             cartridge_type: cartridge_impl,
+            title,
         })
     }
 }

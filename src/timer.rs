@@ -1,18 +1,17 @@
 #[derive(Clone, Copy, Debug)]
-enum TimerControlCpuDivide {
-    Divide16,
-    Divide64,
-    Divide256,
-    Divide1024,
+enum InputClockSelect {
+    Bit3,
+    Bit5,
+    Bit7,
+    Bit9,
 }
 
 #[derive(Clone)]
 pub struct Timer {
-    divider: u8,
     timer_counter: u8,
+    timer_counter_reload_delay: u8,
     timer_modulo: u8,
-    timer_control_enable: bool,
-    timer_control_cpu_divide: TimerControlCpuDivide,
+    timer_control: u8,
     tick_counter: u16,
     interrupt_waiting: bool,
 }
@@ -20,43 +19,56 @@ pub struct Timer {
 impl Default for Timer {
     fn default() -> Self {
         Self {
-            divider: Default::default(),
             timer_counter: Default::default(),
+            timer_counter_reload_delay: Default::default(),
             timer_modulo: Default::default(),
-            timer_control_enable: Default::default(),
-            timer_control_cpu_divide: TimerControlCpuDivide::Divide16,
-            tick_counter: 0,
+            timer_control: Default::default(),
+            tick_counter: Default::default(),
             interrupt_waiting: false,
         }
     }
 }
 
 impl Timer {
-    const DIVIDER_REGISTER_CPU_DIVIDE_RATIO: u16 = 256;
+    const TIMER_COUNTER_RELOAD_DELAY: u8 = 4;
 
     pub fn step(&mut self) {
-        if self.timer_control_enable {
-            let timer_control_interval = match self.timer_control_cpu_divide {
-                TimerControlCpuDivide::Divide16 => 16,
-                TimerControlCpuDivide::Divide64 => 64,
-                TimerControlCpuDivide::Divide256 => 256,
-                TimerControlCpuDivide::Divide1024 => 1024,
-            };
-
-            self.tick_counter = self.tick_counter.wrapping_add(1);
-            if self.tick_counter % timer_control_interval == 0 {
-                let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
-                if overflow {
-                    self.interrupt_waiting = true;
-                    self.timer_counter = self.timer_modulo;
-                } else {
-                    self.timer_counter = new_timer_counter;
-                }
+        if self.timer_counter_reload_delay > 0 {
+            self.timer_counter_reload_delay -= 1;
+            // We can prevent the reload and interrupt by writing manually to
+            // the timer counter during the reload delay.
+            if self.timer_counter_reload_delay == 0 && self.timer_counter == 0 {
+                self.timer_counter = self.timer_modulo;
+                self.interrupt_waiting = true;
             }
         }
 
-        if self.tick_counter % Self::DIVIDER_REGISTER_CPU_DIVIDE_RATIO == 0 {
-            self.divider = self.divider.wrapping_add(1);
+        let input_clock_select_mask = if self.get_timer_enable() {
+            match self.get_input_clock_select() {
+                InputClockSelect::Bit3 => (1 << 3),
+                InputClockSelect::Bit5 => (1 << 5),
+                InputClockSelect::Bit7 => (1 << 7),
+                InputClockSelect::Bit9 => (1 << 9),
+            }
+        } else {
+            0
+        };
+
+        let old_timer_increment_bit = (self.tick_counter & input_clock_select_mask) != 0;
+        self.tick_counter = self.tick_counter.wrapping_add(1);
+        let new_timer_increment_bit = (self.tick_counter & input_clock_select_mask) != 0;
+
+        // Timer counter gets incremented on falling edge.
+        //
+        // When timer counter overflows, there is a 4 clock delay before
+        // actually being reloaded.
+        if old_timer_increment_bit && !new_timer_increment_bit {
+            let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
+            if overflow {
+                self.timer_counter_reload_delay = Self::TIMER_COUNTER_RELOAD_DELAY;
+            }
+
+            self.timer_counter = new_timer_counter;
         }
     }
 
@@ -69,13 +81,42 @@ impl Timer {
         }
     }
 
-    // Writing any value to this register resets it to 0.
+    // Writing any value to divider register resets it and tick counter to 0.
+    //
+    // Timer increment is actually tied to a certain bit in divider register
+    // going low (depending on the CPU divide value). When divider register
+    // is reset via manually writing to it, timer may still be incremented, if
+    // the relevant bit goes low as a result of this write.
     pub fn set_divider_register(&mut self, _value: u8) {
-        self.divider = 0;
+        let input_clock_select_mask = if self.get_timer_enable() {
+            match self.get_input_clock_select() {
+                InputClockSelect::Bit3 => (1 << 3),
+                InputClockSelect::Bit5 => (1 << 5),
+                InputClockSelect::Bit7 => (1 << 7),
+                InputClockSelect::Bit9 => (1 << 9),
+            }
+        } else {
+            0
+        };
+
+        let old_timer_increment_bit = (self.tick_counter & input_clock_select_mask) != 0;
+        self.tick_counter = 0;
+        let new_timer_increment_bit = (self.tick_counter & input_clock_select_mask) != 0;
+
+        // timer gets incremented on falling edge
+        if old_timer_increment_bit && !new_timer_increment_bit {
+            let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
+            if overflow {
+                self.timer_counter_reload_delay = Self::TIMER_COUNTER_RELOAD_DELAY;
+            }
+
+            self.timer_counter = new_timer_counter;
+        }
     }
 
     pub fn get_divider_register(&self) -> u8 {
-        self.divider
+        let [divider_register, _] = self.tick_counter.to_be_bytes();
+        divider_register
     }
 
     pub fn set_timer_counter(&mut self, value: u8) {
@@ -94,30 +135,69 @@ impl Timer {
         self.timer_modulo
     }
 
-    pub fn set_timer_control(&mut self, value: u8) {
-        self.timer_control_cpu_divide = match value & 0b0000_0011 {
-            0b00 => TimerControlCpuDivide::Divide1024,
-            0b01 => TimerControlCpuDivide::Divide16,
-            0b10 => TimerControlCpuDivide::Divide64,
-            0b11 => TimerControlCpuDivide::Divide256,
-            _ => unreachable!(),
-        };
+    const TIMER_CONTROL_INPUT_CLOCK_SELECT_MASK: u8 = 0b11;
+    const TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_3_MASK: u8 = 0b01;
+    const TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_5_MASK: u8 = 0b10;
+    const TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_7_MASK: u8 = 0b11;
+    const TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_9_MASK: u8 = 0b00;
 
-        self.timer_control_enable = (value & 0b0000_0100) != 0;
+    const TIMER_CONTROL_ENABLE_MASK: u8 = 1 << 2;
+
+    fn get_timer_enable(&self) -> bool {
+        (self.timer_control & Self::TIMER_CONTROL_ENABLE_MASK) != 0
+    }
+
+    fn get_input_clock_select(&self) -> InputClockSelect {
+        match self.timer_control & Self::TIMER_CONTROL_INPUT_CLOCK_SELECT_MASK {
+            Self::TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_3_MASK => InputClockSelect::Bit3,
+            Self::TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_5_MASK => InputClockSelect::Bit5,
+            Self::TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_7_MASK => InputClockSelect::Bit7,
+            Self::TIMER_CONTROL_INPUT_CLOCK_SELECT_BIT_9_MASK => InputClockSelect::Bit9,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_timer_control(&mut self, value: u8) {
+        // If timer has been disabled or multiplexer output changes from 1 -> 0,
+        // divider register also effectively goes low wrt. falling edge detector
+        // timer increment.
+        let old_input_clock_select_mask = if self.get_timer_enable() {
+            match self.get_input_clock_select() {
+                InputClockSelect::Bit3 => (1 << 3),
+                InputClockSelect::Bit5 => (1 << 5),
+                InputClockSelect::Bit7 => (1 << 7),
+                InputClockSelect::Bit9 => (1 << 9),
+            }
+        } else {
+            0
+        };
+        let old_timer_increment_bit = (self.tick_counter & old_input_clock_select_mask) != 0;
+
+        self.timer_control = value;
+
+        let new_input_clock_select_mask = if self.get_timer_enable() {
+            match self.get_input_clock_select() {
+                InputClockSelect::Bit3 => (1 << 3),
+                InputClockSelect::Bit5 => (1 << 5),
+                InputClockSelect::Bit7 => (1 << 7),
+                InputClockSelect::Bit9 => (1 << 9),
+            }
+        } else {
+            0
+        };
+        let new_timer_increment_bit = (self.tick_counter & new_input_clock_select_mask) != 0;
+
+        if old_timer_increment_bit && !new_timer_increment_bit {
+            let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
+            if overflow {
+                self.timer_counter_reload_delay = Self::TIMER_COUNTER_RELOAD_DELAY;
+            }
+
+            self.timer_counter = new_timer_counter;
+        }
     }
 
     pub fn get_timer_control(&self) -> u8 {
-        let mut result = match self.timer_control_cpu_divide {
-            TimerControlCpuDivide::Divide1024 => 0b00,
-            TimerControlCpuDivide::Divide16 => 0b01,
-            TimerControlCpuDivide::Divide64 => 0b10,
-            TimerControlCpuDivide::Divide256 => 0b11,
-        };
-
-        if self.timer_control_enable {
-            result |= 0b0000_0100;
-        }
-
-        result
+        self.timer_control
     }
 }

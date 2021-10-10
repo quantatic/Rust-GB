@@ -23,8 +23,8 @@ pub struct Bus {
     interrupt_master_enable: bool,
     low_ram: [u8; 0x2000],
     high_ram: [u8; 0x7F],
-    cartridge: Cartridge,
-    timer: Timer,
+    pub cartridge: Cartridge,
+    pub timer: Timer,
     pub serial: Serial,
     pub ppu: Ppu,
     pub joypad: Joypad,
@@ -245,7 +245,7 @@ impl Bus {
                 self.high_ram[usize::from(address - 0xFF80)] = value;
             }
             0xFFFF => self.interrupt_enable = value & 0b0001_1111,
-            _ => todo!("write of 0x{:02X} to 0x{:02X}", value, address),
+            _ => eprintln!("write of 0x{:02X} to 0x{:02X}", value, address),
         }
     }
 

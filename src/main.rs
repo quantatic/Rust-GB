@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../tests/dmg_acid2.gb");
+const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -49,7 +49,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let window = video_subsystem
         .window(
-            "Aidan's Big-Brain GB Emulator",
+            format!(
+                "Aidan's Big-Brain GB Emulator - Playing {}",
+                cpu.bus.cartridge.get_title()
+            )
+            .as_str(),
             PPU_WIDTH * PPU_SCALE,
             PPU_HEIGHT * PPU_SCALE,
         )
@@ -65,18 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut event_pump = sdl_context.event_pump().unwrap();
 
     let mut debug = false;
-
-    // for _ in 0..105 {
-    //     for _ in 0..1_000_000 {
-    //         cpu.step(false);
-    //     }
-    //     cpu.bus.joypad.set_a_pressed(true);
-
-    //     for _ in 0..2_500_000 {
-    //         cpu.step(false);
-    //     }
-    //     cpu.bus.joypad.set_a_pressed(false);
-    // }
+    let mut i = 0;
 
     loop {
         cpu.step(debug);
@@ -100,126 +93,131 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             canvas.present();
         }
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => return Ok(()),
-                Event::KeyDown {
-                    keycode: Some(UP_KEYCODE),
-                    repeat: false,
-                    ..
-                } => {
-                    cpu.bus.joypad.set_up_pressed(true);
-                }
-                Event::KeyDown {
-                    keycode: Some(DOWN_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_down_pressed(true),
-                Event::KeyDown {
-                    keycode: Some(LEFT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_left_pressed(true),
-                Event::KeyDown {
-                    keycode: Some(RIGHT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_right_pressed(true),
-                Event::KeyDown {
-                    keycode: Some(SELECT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => {
-                    cpu.bus.joypad.set_select_pressed(true);
-                }
-                Event::KeyDown {
-                    keycode: Some(START_KEYCODE),
-                    repeat: false,
-                    ..
-                } => {
-                    cpu.bus.joypad.set_start_pressed(true);
-                }
-                Event::KeyDown {
-                    keycode: Some(A_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_a_pressed(true),
-                Event::KeyDown {
-                    keycode: Some(B_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_b_pressed(true),
-                Event::KeyDown {
-                    keycode: Some(DEBUG_KEYCODE),
-                    repeat: false,
-                    ..
-                } => {
-                    println!("debugging!");
-                    debug = true;
-                }
-                Event::KeyDown {
-                    keycode: Some(SAVE_KEYCODE),
-                    repeat: false,
-                    ..
-                } => save_state = cpu.clone(),
-                Event::KeyDown {
-                    keycode: Some(LOAD_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu = save_state.clone(),
 
-                Event::KeyUp {
-                    keycode: Some(UP_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_up_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(DOWN_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_down_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(LEFT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_left_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(RIGHT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_right_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(SELECT_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_select_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(START_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_start_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(A_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_a_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(B_KEYCODE),
-                    repeat: false,
-                    ..
-                } => cpu.bus.joypad.set_b_pressed(false),
-                Event::KeyUp {
-                    keycode: Some(DEBUG_KEYCODE),
-                    repeat: false,
-                    ..
-                } => debug = false,
-                _ => {}
+        if i % 1_000 == 0 {
+            for event in event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => return Ok(()),
+                    Event::KeyDown {
+                        keycode: Some(UP_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => {
+                        cpu.bus.joypad.set_up_pressed(true);
+                    }
+                    Event::KeyDown {
+                        keycode: Some(DOWN_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_down_pressed(true),
+                    Event::KeyDown {
+                        keycode: Some(LEFT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_left_pressed(true),
+                    Event::KeyDown {
+                        keycode: Some(RIGHT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_right_pressed(true),
+                    Event::KeyDown {
+                        keycode: Some(SELECT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => {
+                        cpu.bus.joypad.set_select_pressed(true);
+                    }
+                    Event::KeyDown {
+                        keycode: Some(START_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => {
+                        cpu.bus.joypad.set_start_pressed(true);
+                    }
+                    Event::KeyDown {
+                        keycode: Some(A_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_a_pressed(true),
+                    Event::KeyDown {
+                        keycode: Some(B_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_b_pressed(true),
+                    Event::KeyDown {
+                        keycode: Some(DEBUG_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => {
+                        println!("debugging!");
+                        debug = true;
+                    }
+                    Event::KeyDown {
+                        keycode: Some(SAVE_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => save_state = cpu.clone(),
+                    Event::KeyDown {
+                        keycode: Some(LOAD_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu = save_state.clone(),
+
+                    Event::KeyUp {
+                        keycode: Some(UP_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_up_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(DOWN_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_down_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(LEFT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_left_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(RIGHT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_right_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(SELECT_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_select_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(START_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_start_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(A_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_a_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(B_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => cpu.bus.joypad.set_b_pressed(false),
+                    Event::KeyUp {
+                        keycode: Some(DEBUG_KEYCODE),
+                        repeat: false,
+                        ..
+                    } => debug = false,
+                    _ => {}
+                }
             }
         }
+
+        i += 1;
     }
 
     Ok(())
@@ -240,6 +238,7 @@ mod tests {
         }
 
         let serial_out = cpu.bus.serial.get_data_written();
+        println!("result: {}", serial_out);
         assert!(serial_out.contains("Passed"));
     }
 
@@ -338,5 +337,72 @@ mod tests {
     #[test]
     fn test_bits_bank_2() {
         test_mooneye_rom_passed(include_bytes!("../tests/bits_bank2.gb"));
+    }
+
+    #[test]
+    fn test_div_write() {
+        test_mooneye_rom_passed(include_bytes!("../tests/div_write.gb"));
+    }
+
+    #[test]
+    fn test_rapid_toggle() {
+        test_mooneye_rom_passed(include_bytes!("../tests/rapid_toggle.gb"));
+    }
+
+    #[test]
+    fn test_tim00() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim00.gb"));
+    }
+
+    #[test]
+    fn test_tim00_div_trigger() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim00_div_trigger.gb"));
+    }
+
+    #[test]
+    fn test_tim01() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim01.gb"));
+    }
+
+    #[test]
+    fn test_tim01_div_trigger() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim01_div_trigger.gb"));
+    }
+
+    #[test]
+    fn test_tim10() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim10.gb"));
+    }
+
+    #[test]
+    fn test_tim10_div_trigger() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim10_div_trigger.gb"));
+    }
+
+    #[test]
+    fn test_tim11() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim11.gb"));
+    }
+
+    #[test]
+    fn test_tim11_div_trigger() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tim11_div_trigger.gb"));
+    }
+
+    #[test]
+    fn test_tima_reload() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tima_reload.gb"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_tima_write_reloading() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tima_write_reloading.gb"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_tma_write_reloading() {
+        test_mooneye_rom_passed(include_bytes!("../tests/tma_write_reloading.gb"));
     }
 }
