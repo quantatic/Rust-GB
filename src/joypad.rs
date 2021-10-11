@@ -22,67 +22,67 @@ impl Joypad {
     const INPUT_RIGHT_A_MASK: u8 = 1 << 0;
 
     pub fn set_up_pressed(&mut self, val: bool) {
-        self.up_pressed = val;
-
-        if val && self.direction_buttons_selected {
+        if !self.up_pressed && val && self.direction_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.up_pressed = val;
     }
 
     pub fn set_down_pressed(&mut self, val: bool) {
-        self.down_pressed = val;
-
-        if val && self.direction_buttons_selected {
+        if !self.down_pressed && val && self.direction_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.down_pressed = val;
     }
 
     pub fn set_left_pressed(&mut self, val: bool) {
-        self.left_pressed = val;
-
-        if val && self.direction_buttons_selected {
+        if !self.left_pressed && val && self.direction_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.left_pressed = val;
     }
 
     pub fn set_right_pressed(&mut self, val: bool) {
-        self.right_pressed = val;
-
-        if val && self.direction_buttons_selected {
+        if !self.right_pressed && val && self.direction_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.right_pressed = val;
     }
 
     pub fn set_start_pressed(&mut self, val: bool) {
-        self.start_pressed = val;
-
-        if val && self.action_buttons_selected {
+        if !self.start_pressed && val && self.action_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.start_pressed = val;
     }
 
     pub fn set_select_pressed(&mut self, val: bool) {
-        self.select_pressed = val;
-
-        if val && self.action_buttons_selected {
+        if !self.select_pressed && val && self.action_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.select_pressed = val;
     }
 
     pub fn set_b_pressed(&mut self, val: bool) {
-        self.b_pressed = val;
-
-        if val && self.action_buttons_selected {
+        if !self.b_pressed && val && self.action_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.b_pressed = val;
     }
 
     pub fn set_a_pressed(&mut self, val: bool) {
-        self.a_pressed = val;
-
-        if val && self.action_buttons_selected {
+        if !self.a_pressed && val && self.action_buttons_selected {
             self.interrupt_waiting = true;
         }
+
+        self.a_pressed = val;
     }
 
     pub fn poll_interrupt(&mut self) -> bool {

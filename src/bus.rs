@@ -188,7 +188,8 @@ impl Bus {
             0xFEA0..=0xFEFF => {} // unusable memory, write is no-op
             0xFF00 => self.joypad.write(value),
             0xFF01 => self.serial.write_byte(value),
-            0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
+            // 0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
+            0xFF02 => {}
             0xFF04 => self.timer.set_divider_register(value),
             0xFF05 => self.timer.set_timer_counter(value),
             0xFF06 => self.timer.set_timer_modulo(value),
@@ -217,11 +218,12 @@ impl Bus {
             0xFF24 => self.apu.write_nr50(value),
             0xFF25 => self.apu.write_nr51(value),
             0xFF26 => self.apu.write_nr52(value),
-            0xFF30..=0xFF3F => eprintln!(
-                "writing 0x{:02X} to WAVE_PATTERN_RAM[{:02X}]",
-                value,
-                address - 0xFF30
-            ),
+            // 0xFF30..=0xFF3F => eprintln!(
+            //     "writing 0x{:02X} to WAVE_PATTERN_RAM[{:02X}]",
+            //     value,
+            //     address - 0xFF30
+            // ),
+            0xFF30..=0xFF3F => {}
             0xFF40 => self.ppu.write_lcd_control(value),
             0xFF41 => self.ppu.write_stat(value),
             0xFF42 => self.ppu.write_scroll_y(value),

@@ -294,21 +294,22 @@ impl Cpu {
             if let Some(interrupt_type) = self.bus.poll_interrupt() {
                 self.handle_interrupt(interrupt_type);
                 if log {
-                    eprintln!("Handled interrupt: {:?}", interrupt_type);
+                    // eprintln!("Handled interrupt: {:?}", interrupt_type);
                 }
                 self.cycles_delay = 20;
             } else {
-                if log {
-                    println!("{:#x?}", self);
+                if log || self.pc > 0x7FFF {
+                    // println!("{:#x?}", self);
                 }
                 let decoded = self.decode(log);
-                if log {
-                    println!("{:#x?}", decoded);
+                if log || self.pc > 0x7FFF {
+                    // println!("{:#x?}", decoded);
                 }
                 self.cycles_delay = self.execute(decoded);
-                if log {
-                    println!("{:#x?}", self);
-                    println!("----------------");
+                if log || self.pc > 0x7FFF {
+                    // println!("{:#x?}", decoded);
+                    // println!("{:#x?}", self);
+                    // println!("----------------");
                 }
             }
         }
@@ -1166,7 +1167,7 @@ impl Cpu {
                     cycles: 4,
                 }
             }
-            _ => unreachable!("unknown opcode {:#02X}", opcode),
+            _ => unreachable!("unknown opcode 0x{:02X}, PC: 0x{:02X}", opcode, self.pc),
         }
     }
 

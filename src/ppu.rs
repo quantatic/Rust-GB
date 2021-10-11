@@ -65,6 +65,9 @@ pub struct Ppu {
     stat_interrupt_waiting: bool,
     dot: u16,
     lcd_y: u8,
+    window_lcd_y: u8,
+    window_y_condition_triggered: bool,
+    window_x_condition_triggered: bool,
     lcd_y_compare: u8,
     stat: u8,
     lcd_control: u8,
@@ -89,6 +92,9 @@ impl Default for Ppu {
             stat_interrupt_waiting: Default::default(),
             dot: Default::default(),
             lcd_y: Default::default(),
+            window_lcd_y: Default::default(),
+            window_x_condition_triggered: Default::default(),
+            window_y_condition_triggered: Default::default(),
             lcd_y_compare: Default::default(),
             stat: Default::default(),
             lcd_control: Default::default(),
@@ -115,15 +121,25 @@ impl Ppu {
         if self.lcd_y < 144 {
             if self.dot == 0 {
                 self.set_stat_mode(PpuMode::OAMSearch);
+                self.window_y_condition_triggered |= self.window_y == self.lcd_y;
             } else if self.dot == 80 {
                 self.set_stat_mode(PpuMode::PixelTransfer);
             } else if self.dot == 252 {
                 self.set_stat_mode(PpuMode::HBlank);
+
+                // Window displayed falling edge increments hidden window lcd y.
+                let old_window_displayed = self.get_window_displayed();
+                self.window_x_condition_triggered = false;
+                let new_window_displayed = self.get_window_displayed();
+                if old_window_displayed && !new_window_displayed {
+                    self.window_lcd_y += 1;
+                }
             }
         } else if self.lcd_y == 144 {
             if self.dot == 0 {
                 self.set_stat_mode(PpuMode::VBlank);
                 self.vblank_interrupt_waiting = true;
+                self.window_y_condition_triggered = false;
             }
         }
 
@@ -161,12 +177,18 @@ impl Ppu {
 
                     non_zero_bg_window_pixel_drawn |= bg_pixel_palette_idx != 0;
 
-                    if self.get_window_enable()
-                        && self.window_y <= buffer_y
-                        && self.window_x <= buffer_x + 7
-                    {
+                    // window_x is "actual_window_x + 7". Values less than 7 result in
+                    // buggy behavior. For now, when window_x < 7, trigger window x
+                    // condition iff render_x == 0.
+                    if self.window_x >= 7 {
+                        self.window_x_condition_triggered |= buffer_x + 7 == self.window_x;
+                    } else {
+                        self.window_x_condition_triggered |= buffer_x == 0;
+                    };
+
+                    if self.get_window_displayed() {
                         let window_render_x = u16::from(buffer_x + 7 - self.window_x);
-                        let window_render_y = u16::from(buffer_y - self.window_y);
+                        let window_render_y = u16::from(self.window_lcd_y);
 
                         let window_tile_x = window_render_x / 8;
                         let window_tile_y = window_render_y / 8;
@@ -320,6 +342,7 @@ impl Ppu {
 
             if self.lcd_y > 153 {
                 self.lcd_y = 0;
+                self.window_lcd_y = 0;
             }
         }
     }
@@ -476,7 +499,16 @@ impl Ppu {
     }
 
     pub fn write_lcd_control(&mut self, data: u8) {
+        let old_window_displayed = self.get_window_displayed();
+        let old_enable = self.get_window_enable();
         self.lcd_control = data;
+        let new_window_displayed = self.get_window_displayed();
+        let new_enable = self.get_window_enable();
+
+        // Window displayed falling edge increments hidden window lcd y.
+        if old_window_displayed && !new_window_displayed {
+            self.window_lcd_y += 1;
+        }
     }
 
     fn get_lcd_ppu_enable(&self) -> bool {
@@ -496,6 +528,12 @@ impl Ppu {
     fn get_window_enable(&self) -> bool {
         const WINDOW_ENABLE_MASK: u8 = 1 << 5;
         (self.lcd_control & WINDOW_ENABLE_MASK) != 0
+    }
+
+    fn get_window_displayed(&self) -> bool {
+        self.window_x_condition_triggered
+            && self.window_y_condition_triggered
+            && self.get_window_enable()
     }
 
     fn get_bg_window_tile_data(&self, tile_id: u8) -> &[u8] {
@@ -584,7 +622,7 @@ impl Ppu {
     }
 
     pub fn write_window_x(&mut self, value: u8) {
-        self.window_x = value
+        self.window_x = value;
     }
 
     pub fn read_bg_palette(&self) -> u8 {

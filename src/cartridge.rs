@@ -87,12 +87,6 @@ impl NoMbc {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Mbc1Type {
-    LargeRom,
-    LargeRam,
-}
-
 #[derive(Clone)]
 struct Mbc1 {
     rom: Vec<[u8; 0x4000]>,
@@ -106,11 +100,20 @@ struct Mbc1 {
 }
 
 impl Mbc1 {
+    const EXPECTED_RAM_SIZES: [usize; 3] = [0x0000, 0x2000, 0x8000];
+
     fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
-        if ram_size % 0x2000 != 0 {
+        if !Self::EXPECTED_RAM_SIZES.contains(&ram_size) {
+            let expected_string = format!(
+                "[{}]",
+                Self::EXPECTED_RAM_SIZES
+                    .map(|size| format!("0x{:04X}", size))
+                    .join(", ")
+            );
+
             return Err(format!(
-                "expected ram size to be divisible by 0x2000, but got 0x{:04X}",
-                ram_size
+                "expected ram size to be one of {}, but got 0x{:04X}",
+                expected_string, ram_size
             )
             .into());
         }
