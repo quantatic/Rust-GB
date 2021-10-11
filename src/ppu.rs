@@ -116,6 +116,11 @@ impl Default for Ppu {
 
 impl Ppu {
     pub fn step(&mut self) {
+        // If lcd/ppu is disabled, don't do anything.
+        if !self.get_lcd_ppu_enable() {
+            return;
+        }
+
         if self.lcd_y == self.lcd_y_compare {
             self.set_stat_lyc_equals_ly(true);
         } else {
@@ -498,6 +503,7 @@ impl Ppu {
             let line_high = self.stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy);
             if !old_interrupt_line && line_high {
                 self.stat_interrupt_waiting = true;
+                println!("new stat!");
             }
 
             self.stat |= Self::STAT_LYC_EQUAL_LY_MASK;

@@ -18,7 +18,7 @@ use sdl2::rect::Rect;
 
 use std::error::Error;
 
-const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
+const ROM: &[u8] = include_bytes!("../super_mario_land_2.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut i = 0;
 
     loop {
-        cpu.step(debug);
+        cpu.step(false);
         if cpu.bus.ppu.should_print() {
             for (y, row) in cpu.bus.ppu.get_buffer().iter().enumerate() {
                 for (x, pixel) in row.iter().cloned().enumerate() {

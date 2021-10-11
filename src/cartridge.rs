@@ -15,26 +15,26 @@ enum CartridgeType {
 }
 
 impl Cartridge {
-    pub fn read(&self, offset: u16) -> u8 {
+    pub fn read(&self, address: u16) -> u8 {
         match &self.cartridge_type {
-            CartridgeType::NoMbc(no_mbc) => no_mbc.read(offset),
-            CartridgeType::Mbc1(mbc_1) => mbc_1.read(offset),
-            CartridgeType::Mbc3(mbc_3) => mbc_3.read(offset),
+            CartridgeType::NoMbc(no_mbc) => no_mbc.read(address),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.read(address),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.read(address),
         }
     }
 
-    pub fn write(&mut self, value: u8, offset: u16) {
+    pub fn write(&mut self, value: u8, address: u16) {
         match &mut self.cartridge_type {
-            CartridgeType::NoMbc(no_mbc) => no_mbc.write(value, offset),
-            CartridgeType::Mbc1(mbc_1) => mbc_1.write(value, offset),
-            CartridgeType::Mbc3(mbc_3) => mbc_3.write(value, offset),
+            CartridgeType::NoMbc(no_mbc) => no_mbc.write(value, address),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.write(value, address),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.write(value, address),
         }
     }
 
     pub fn step(&mut self) {
         match &mut self.cartridge_type {
-            CartridgeType::NoMbc(no_mbc) => {}
-            CartridgeType::Mbc1(mbc_1) => {}
+            CartridgeType::NoMbc(_) => {}
+            CartridgeType::Mbc1(_) => {}
             CartridgeType::Mbc3(mbc_3) => mbc_3.step(),
         }
     }
@@ -70,18 +70,18 @@ impl NoMbc {
         })
     }
 
-    fn read(&self, offset: u16) -> u8 {
-        match offset {
-            0x0000..=0x7FFF => self.rom[usize::from(offset)],
-            0xA000..=0xBFFF => self.ram[0][usize::from(offset - 0xA000)],
+    fn read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x7FFF => self.rom[usize::from(address)],
+            0xA000..=0xBFFF => self.ram[0][usize::from(address - 0xA000)],
             _ => unreachable!(),
         }
     }
 
-    fn write(&mut self, value: u8, offset: u16) {
-        match offset {
+    fn write(&mut self, value: u8, address: u16) {
+        match address {
             0x0000..=0x7FFF => {} // writing to ROM does nothing with no MBC
-            0xA000..=0xBFFF => self.ram[0][usize::from(offset - 0xA000)] = value,
+            0xA000..=0xBFFF => self.ram[0][usize::from(address - 0xA000)] = value,
             _ => unreachable!(),
         };
     }
@@ -137,26 +137,27 @@ impl Mbc1 {
         })
     }
 
-    fn read(&self, offset: u16) -> u8 {
-        match offset {
+    fn read(&self, address: u16) -> u8 {
+        match address {
             0x0000..=0x3FFF => {
                 let bank_number = if self.simple_rom_banking {
                     0
                 } else {
                     self.bank_2 << 5
                 };
-                self.rom[bank_number % self.rom_banks][usize::from(offset)]
+                self.rom[bank_number % self.rom_banks][usize::from(address)]
             }
             0x4000..=0x7FFF => {
                 let bank_number = self.bank_1 | (self.bank_2 << 5);
-                self.rom[bank_number % self.rom_banks][usize::from(offset - 0x4000)]
+                let result = self.rom[bank_number % self.rom_banks][usize::from(address - 0x4000)];
+                result
             }
             0xA000..=0xBFFF => {
                 if self.ram_enabled {
                     if self.simple_rom_banking {
-                        self.ram[0][usize::from(offset - 0xA000)]
+                        self.ram[0][usize::from(address - 0xA000)]
                     } else {
-                        self.ram[self.bank_2 % self.ram_banks][usize::from(offset - 0xA000)]
+                        self.ram[self.bank_2 % self.ram_banks][usize::from(address - 0xA000)]
                     }
                 } else {
                     0xFF
@@ -166,8 +167,8 @@ impl Mbc1 {
         }
     }
 
-    fn write(&mut self, value: u8, offset: u16) {
-        match offset {
+    fn write(&mut self, value: u8, address: u16) {
+        match address {
             0x0000..=0x1FFF => self.ram_enabled = (value & 0xF) == 0x0A,
             0x2000..=0x3FFF => {
                 self.bank_1 = usize::from(value) & 0b11111;
@@ -176,14 +177,18 @@ impl Mbc1 {
                     self.bank_1 = 1;
                 }
             }
-            0x4000..=0x5FFF => self.bank_2 = usize::from(value & 0b11),
-            0x6000..=0x7FFF => self.simple_rom_banking = (value & 0b1) == 0,
+            0x4000..=0x5FFF => {
+                self.bank_2 = usize::from(value & 0b11);
+            }
+            0x6000..=0x7FFF => {
+                self.simple_rom_banking = (value & 0b1) == 0;
+            }
             0xA000..=0xBFFF => {
                 if self.ram_enabled {
                     if self.simple_rom_banking {
-                        self.ram[0][usize::from(offset - 0xA000)] = value;
+                        self.ram[0][usize::from(address - 0xA000)] = value;
                     } else {
-                        self.ram[self.bank_2 % self.ram_banks][usize::from(offset - 0xA000)] =
+                        self.ram[self.bank_2 % self.ram_banks][usize::from(address - 0xA000)] =
                             value;
                     }
                 }
@@ -246,14 +251,14 @@ impl Mbc3 {
         })
     }
 
-    fn read(&self, offset: u16) -> u8 {
-        match offset {
-            0x0000..=0x3FFF => self.rom[0][usize::from(offset)],
-            0x4000..=0x7FFF => self.rom[self.rom_bank][usize::from(offset - 0x4000)],
+    fn read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => self.rom[0][usize::from(address)],
+            0x4000..=0x7FFF => self.rom[self.rom_bank][usize::from(address - 0x4000)],
             0xA000..=0xBFFF => {
                 if self.ram_enabled {
                     match self.ram_bank {
-                        0x00..=0x03 => self.ram[self.ram_bank][usize::from(offset - 0xA000)],
+                        0x00..=0x03 => self.ram[self.ram_bank][usize::from(address - 0xA000)],
                         0x08 => self.rtc_secs,
                         0x09 => self.rtc_mins,
                         0x0A => self.rtc_hours,
@@ -269,8 +274,8 @@ impl Mbc3 {
         }
     }
 
-    fn write(&mut self, value: u8, offset: u16) {
-        match offset {
+    fn write(&mut self, value: u8, address: u16) {
+        match address {
             0x0000..=0x1FFF => self.ram_enabled = value != 0,
             0x2000..=0x3FFF => self.rom_bank = if value == 0 { 1 } else { usize::from(value) },
             0x4000..=0x5FFF => self.ram_bank = usize::from(value),
@@ -279,7 +284,7 @@ impl Mbc3 {
                 if self.ram_enabled {
                     match self.ram_bank {
                         0x00..=0x03 => {
-                            self.ram[self.ram_bank][usize::from(offset - 0xA000)] = value
+                            self.ram[self.ram_bank][usize::from(address - 0xA000)] = value
                         }
                         0x08..=0x0C => {
                             match self.ram_bank {

@@ -298,18 +298,18 @@ impl Cpu {
                 }
                 self.cycles_delay = 20;
             } else {
-                if log || self.pc > 0x7FFF {
-                    // println!("{:#x?}", self);
+                if log {
+                    println!("{:#x?}", self);
                 }
                 let decoded = self.decode(log);
-                if log || self.pc > 0x7FFF {
-                    // println!("{:#x?}", decoded);
+                if log {
+                    println!("{:#x?}", decoded);
                 }
+
                 self.cycles_delay = self.execute(decoded);
-                if log || self.pc > 0x7FFF {
-                    // println!("{:#x?}", decoded);
-                    // println!("{:#x?}", self);
-                    // println!("----------------");
+                if log {
+                    println!("{:#x?}", self);
+                    println!("----------------");
                 }
             }
         }
@@ -406,9 +406,15 @@ impl Cpu {
                 let address = 0xFF00 + u16::from(self.read_byte(AddressingModeByte::C));
                 self.bus.write_byte_address(val, address);
             }
-            AddressingModeByte::BcIndirect => self.bus.write_byte_address(val, self.bc),
-            AddressingModeByte::DeIndirect => self.bus.write_byte_address(val, self.de),
-            AddressingModeByte::HlIndirect => self.bus.write_byte_address(val, self.hl),
+            AddressingModeByte::BcIndirect => {
+                self.bus.write_byte_address(val, self.bc);
+            }
+            AddressingModeByte::DeIndirect => {
+                self.bus.write_byte_address(val, self.de);
+            }
+            AddressingModeByte::HlIndirect => {
+                self.bus.write_byte_address(val, self.hl);
+            }
             AddressingModeByte::HlIndirectIncrement => {
                 self.bus.write_byte_address(val, self.hl);
                 self.hl = self.hl.wrapping_add(1)

@@ -166,18 +166,22 @@ impl Bus {
     }
 
     pub fn read_word_address(&self, address: u16) -> u16 {
-        let low = self.read_byte_address(address);
-        let high = self.read_byte_address(address + 1);
-        u16::from_le_bytes([low, high])
+        let first_byte = self.read_byte_address(address);
+        let second_byte = self.read_byte_address(address + 1);
+        u16::from_le_bytes([first_byte, second_byte])
     }
 
     pub fn write_byte_address(&mut self, value: u8, address: u16) {
         match address {
-            0x0000..=0x7FFF => self.cartridge.write(value, address),
+            0x0000..=0x7FFF => {
+                self.cartridge.write(value, address);
+            }
             0x8000..=0x97FF => {
                 self.ppu.write_character_ram(value, address - 0x8000);
             }
-            0x9800..=0x9BFF => self.ppu.write_bg_map_data_1(value, address - 0x9800),
+            0x9800..=0x9BFF => {
+                self.ppu.write_bg_map_data_1(value, address - 0x9800);
+            }
             0x9C00..=0x9FFF => self.ppu.write_bg_map_data_2(value, address - 0x9C00),
             0xA000..=0xBFFF => self.cartridge.write(value, address),
             0xC000..=0xDFFF => self.low_ram[usize::from(address - 0xC000)] = value,
