@@ -7,18 +7,22 @@ mod ppu;
 mod serial;
 mod timer;
 
+use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::ppu::PaletteColor;
 
+use sdl2::audio::{self, AudioQueue, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 
+use std::convert::TryInto;
 use std::error::Error;
+use std::time::{Duration, Instant};
 
-const ROM: &[u8] = include_bytes!("../super_mario_land_2.gb");
+const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
 
 const PPU_WIDTH: u32 = 160;
 const PPU_HEIGHT: u32 = 144;
@@ -38,6 +42,13 @@ const DEBUG_KEYCODE: Keycode = Keycode::D;
 const SAVE_KEYCODE: Keycode = Keycode::S;
 const LOAD_KEYCODE: Keycode = Keycode::L;
 
+const CLOCK_FREQUENCY: u64 = 4_194_304;
+const AUDIO_SAMPLE_FREQUENCY: u64 = 65536;
+const INPUT_FREQUENCY: u64 = 60;
+
+const AUDIO_CLOCK_PERIOD: u64 = CLOCK_FREQUENCY / AUDIO_SAMPLE_FREQUENCY;
+const INPUT_PERIOD: u64 = CLOCK_FREQUENCY / INPUT_FREQUENCY;
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
     let cartridge = Cartridge::new(ROM)?;
@@ -46,6 +57,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
+    let audio_subsystem = sdl_context.audio().unwrap();
+
+    let spec = AudioSpecDesired {
+        channels: Some(2),
+        freq: Some(AUDIO_SAMPLE_FREQUENCY.try_into()?),
+        samples: None,
+    };
+
+    let player: AudioQueue<f32> = audio_subsystem.open_queue(None, &spec)?;
+    player.resume();
 
     let window = video_subsystem
         .window(
@@ -63,17 +84,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut canvas = window.into_canvas().build().unwrap();
 
-    canvas.set_draw_color(Color::RGB(0, 255, 255));
-    canvas.clear();
-    canvas.present();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
-    let mut debug = false;
-    let mut i = 0;
+    let start_time = Instant::now();
 
-    loop {
+    let mut audio_timer: u64 = 0;
+    let mut input_timer: u64 = 0;
+
+    for clock in 0.. {
+        // wait while our elapsed time is less than it should be, based on the clock interval.
+        while start_time.elapsed() < Duration::from_nanos(1_000_000_000 * clock / CLOCK_FREQUENCY) {
+        }
         cpu.step(false);
-        if cpu.bus.ppu.should_print() {
+
+        audio_timer = audio_timer.saturating_sub(1);
+        if audio_timer == 0 {
+            let sample = cpu.bus.apu.sample();
+            player.queue(&sample);
+            audio_timer = AUDIO_CLOCK_PERIOD;
+        }
+
+        if cpu.bus.ppu.poll_render_ready() {
             for (y, row) in cpu.bus.ppu.get_buffer().iter().enumerate() {
                 for (x, pixel) in row.iter().cloned().enumerate() {
                     let color = match pixel {
@@ -94,7 +125,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             canvas.present();
         }
 
-        if i % 1_000 == 0 {
+        input_timer = input_timer.saturating_sub(1);
+        if input_timer == 0 {
             for event in event_pump.poll_iter() {
                 match event {
                     Event::Quit { .. }
@@ -149,14 +181,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         ..
                     } => cpu.bus.joypad.set_b_pressed(true),
                     Event::KeyDown {
-                        keycode: Some(DEBUG_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => {
-                        println!("debugging!");
-                        debug = true;
-                    }
-                    Event::KeyDown {
                         keycode: Some(SAVE_KEYCODE),
                         repeat: false,
                         ..
@@ -207,17 +231,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                         repeat: false,
                         ..
                     } => cpu.bus.joypad.set_b_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(DEBUG_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => debug = false,
                     _ => {}
                 }
             }
-        }
 
-        i += 1;
+            input_timer = INPUT_PERIOD;
+        }
     }
 
     Ok(())

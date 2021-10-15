@@ -101,9 +101,10 @@ impl Bus {
             self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
         }
 
+        self.apu.step();
         self.cartridge.step();
-        self.timer.step();
         self.ppu.step();
+        self.timer.step();
     }
 
     pub fn read_byte_address(&self, address: u16) -> u8 {
@@ -222,12 +223,7 @@ impl Bus {
             0xFF24 => self.apu.write_nr50(value),
             0xFF25 => self.apu.write_nr51(value),
             0xFF26 => self.apu.write_nr52(value),
-            // 0xFF30..=0xFF3F => eprintln!(
-            //     "writing 0x{:02X} to WAVE_PATTERN_RAM[{:02X}]",
-            //     value,
-            //     address - 0xFF30
-            // ),
-            0xFF30..=0xFF3F => {}
+            0xFF30..=0xFF3F => self.apu.write_wave_pattern_ram(value, address - 0xFF30),
             0xFF40 => self.ppu.write_lcd_control(value),
             0xFF41 => self.ppu.write_stat(value),
             0xFF42 => self.ppu.write_scroll_y(value),

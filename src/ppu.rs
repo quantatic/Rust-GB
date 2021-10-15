@@ -82,6 +82,7 @@ pub struct Ppu {
     obj_palette_1: [PaletteColor; 4],
     obj_palette_2: [PaletteColor; 4],
     scanline_seen_sprites: HashSet<usize>,
+    should_render: bool,
 }
 
 impl Default for Ppu {
@@ -110,6 +111,7 @@ impl Default for Ppu {
             obj_palette_1: [PaletteColor::White; 4],
             obj_palette_2: [PaletteColor::White; 4],
             scanline_seen_sprites: Default::default(),
+            should_render: false,
         }
     }
 }
@@ -127,10 +129,14 @@ impl Ppu {
             self.set_stat_lyc_equals_ly(false);
         }
 
+        if self.lcd_y == 0 && self.dot == 0 {
+            self.should_render = false;
+        }
+
         if self.lcd_y < 144 {
             if self.dot == 0 {
                 self.set_stat_mode(PpuMode::OAMSearch);
-                self.window_y_condition_triggered |= self.window_y == self.lcd_y;
+                self.window_y_condition_triggered |= self.lcd_y == self.window_y
             } else if self.dot == 80 {
                 self.set_stat_mode(PpuMode::PixelTransfer);
                 self.scanline_seen_sprites.clear();
@@ -150,6 +156,7 @@ impl Ppu {
                 self.set_stat_mode(PpuMode::VBlank);
                 self.vblank_interrupt_waiting = true;
                 self.window_y_condition_triggered = false;
+                self.should_render = true;
             }
         }
 
@@ -376,8 +383,13 @@ impl Ppu {
         }
     }
 
-    pub fn should_print(&self) -> bool {
-        self.lcd_y == 0 && self.dot == 0
+    pub fn poll_render_ready(&mut self) -> bool {
+        if self.should_render {
+            self.should_render = false;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn get_buffer(&self) -> &[[PaletteColor; 160]; 144] {
@@ -503,7 +515,6 @@ impl Ppu {
             let line_high = self.stat_interrupt_source_enabled(StatInterruptSource::LycEqualsLy);
             if !old_interrupt_line && line_high {
                 self.stat_interrupt_waiting = true;
-                println!("new stat!");
             }
 
             self.stat |= Self::STAT_LYC_EQUAL_LY_MASK;
@@ -530,10 +541,8 @@ impl Ppu {
 
     pub fn write_lcd_control(&mut self, data: u8) {
         let old_window_displayed = self.get_window_displayed();
-        let old_enable = self.get_window_enable();
         self.lcd_control = data;
         let new_window_displayed = self.get_window_displayed();
-        let new_enable = self.get_window_enable();
 
         // Window displayed falling edge increments hidden window lcd y.
         if old_window_displayed && !new_window_displayed {
@@ -561,9 +570,10 @@ impl Ppu {
     }
 
     fn get_window_displayed(&self) -> bool {
-        self.window_x_condition_triggered
+        let result = self.window_x_condition_triggered
             && self.window_y_condition_triggered
-            && self.get_window_enable()
+            && self.get_window_enable();
+        result
     }
 
     fn get_bg_window_tile_data(&self, tile_id: u8) -> &[u8] {
@@ -644,7 +654,15 @@ impl Ppu {
     }
 
     pub fn write_window_y(&mut self, value: u8) {
+        let old_window_displayed = self.get_window_displayed();
         self.window_y = value;
+        self.window_y_condition_triggered = false;
+        let new_window_displayed = self.get_window_displayed();
+
+        // Window displayed falling edge increments hidden window lcd y.
+        if old_window_displayed && !new_window_displayed {
+            self.window_lcd_y += 1;
+        }
     }
 
     pub fn read_window_x(&self) -> u8 {
@@ -652,7 +670,15 @@ impl Ppu {
     }
 
     pub fn write_window_x(&mut self, value: u8) {
+        let old_window_displayed = self.get_window_displayed();
         self.window_x = value;
+        self.window_x_condition_triggered = false;
+        let new_window_displayed = self.get_window_displayed();
+
+        // Window displayed falling edge increments hidden window lcd y.
+        if old_window_displayed && !new_window_displayed {
+            self.window_lcd_y += 1;
+        }
     }
 
     pub fn read_bg_palette(&self) -> u8 {
