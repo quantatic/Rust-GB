@@ -278,7 +278,7 @@ impl Cpu {
 }
 
 impl Cpu {
-    pub fn step(&mut self, log: bool) {
+    pub fn step(&mut self) {
         self.bus.step();
 
         // If currently halted, check to see if ongoing halt is finished. If not, bail.
@@ -293,24 +293,10 @@ impl Cpu {
         if self.cycles_delay == 0 {
             if let Some(interrupt_type) = self.bus.poll_interrupt() {
                 self.handle_interrupt(interrupt_type);
-                if log {
-                    // eprintln!("Handled interrupt: {:?}", interrupt_type);
-                }
                 self.cycles_delay = 20;
             } else {
-                if log {
-                    println!("{:#x?}", self);
-                }
-                let decoded = self.decode(log);
-                if log {
-                    println!("{:#x?}", decoded);
-                }
-
+                let decoded = self.decode();
                 self.cycles_delay = self.execute(decoded);
-                if log {
-                    println!("{:#x?}", self);
-                    println!("----------------");
-                }
             }
         }
 
@@ -446,11 +432,8 @@ impl Cpu {
         }
     }
 
-    fn decode(&mut self, log: bool) -> Instruction {
+    fn decode(&mut self) -> Instruction {
         let opcode = self.bus.read_byte_address(self.pc);
-        if log {
-            println!("0x{:04X} -> 0x{:02X}", self.pc, opcode);
-        }
         match opcode {
             0x00 => {
                 self.pc += 1;

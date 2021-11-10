@@ -149,8 +149,7 @@ impl Mbc1 {
             }
             0x4000..=0x7FFF => {
                 let bank_number = self.bank_1 | (self.bank_2 << 5);
-                let result = self.rom[bank_number % self.rom_banks][usize::from(address - 0x4000)];
-                result
+                self.rom[bank_number % self.rom_banks][usize::from(address - 0x4000)]
             }
             0xA000..=0xBFFF => {
                 if self.ram_enabled {

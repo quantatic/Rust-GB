@@ -4,6 +4,7 @@ mod cartridge;
 mod cpu;
 mod joypad;
 mod ppu;
+mod samples_queue;
 mod serial;
 mod timer;
 
@@ -11,12 +12,14 @@ use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::ppu::PaletteColor;
+use crate::samples_queue::samples_queue;
 
-use sdl2::audio::{self, AudioQueue, AudioSpecDesired};
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
+use pixels::{wgpu::TextureFormat, Pixels, PixelsBuilder, SurfaceTexture};
+use rodio::Sample;
+use winit::dpi::LogicalSize;
+use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
 
 use std::convert::TryInto;
 use std::error::Error;
@@ -24,30 +27,13 @@ use std::time::{Duration, Instant};
 
 const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
 
-const PPU_WIDTH: u32 = 160;
-const PPU_HEIGHT: u32 = 144;
-const PPU_SCALE: u32 = 4;
+const PPU_WIDTH: u16 = 160;
+const PPU_HEIGHT: u16 = 144;
+const PPU_SCALE: u16 = 4;
 
-const UP_KEYCODE: Keycode = Keycode::Up;
-const DOWN_KEYCODE: Keycode = Keycode::Down;
-const LEFT_KEYCODE: Keycode = Keycode::Left;
-const RIGHT_KEYCODE: Keycode = Keycode::Right;
-
-const START_KEYCODE: Keycode = Keycode::Return;
-const SELECT_KEYCODE: Keycode = Keycode::RShift;
-const A_KEYCODE: Keycode = Keycode::Z;
-const B_KEYCODE: Keycode = Keycode::X;
-
-const DEBUG_KEYCODE: Keycode = Keycode::D;
-const SAVE_KEYCODE: Keycode = Keycode::S;
-const LOAD_KEYCODE: Keycode = Keycode::L;
-
-const CLOCK_FREQUENCY: u64 = 4_194_304;
-const AUDIO_SAMPLE_FREQUENCY: u64 = 65536;
-const INPUT_FREQUENCY: u64 = 60;
-
-const AUDIO_CLOCK_PERIOD: u64 = CLOCK_FREQUENCY / AUDIO_SAMPLE_FREQUENCY;
-const INPUT_PERIOD: u64 = CLOCK_FREQUENCY / INPUT_FREQUENCY;
+const CLOCK_FREQUENCY: u32 = 4_194_304;
+const AUDIO_SAMPLE_FREQUENCY: u32 = 44_100;
+const CLOCKS_PER_FRAME: u32 = 70_224;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
@@ -55,191 +41,108 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut cpu = Cpu::new(cartridge);
     let mut save_state = cpu.clone();
 
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-    let audio_subsystem = sdl_context.audio().unwrap();
-
-    let spec = AudioSpecDesired {
-        channels: Some(2),
-        freq: Some(AUDIO_SAMPLE_FREQUENCY.try_into()?),
-        samples: None,
+    let event_loop = EventLoop::new();
+    let window = {
+        let size = LogicalSize::new(PPU_WIDTH * PPU_SCALE, PPU_HEIGHT * PPU_SCALE);
+        WindowBuilder::new()
+            .with_title("Aidan's Gameboy Emulator")
+            .with_inner_size(size)
+            .with_min_inner_size(size)
+            .build(&event_loop)?
     };
 
-    let player: AudioQueue<f32> = audio_subsystem.open_queue(None, &spec)?;
-    player.resume();
+    let mut pixels = {
+        let window_size = window.inner_size();
+        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
+        PixelsBuilder::new(u32::from(PPU_WIDTH), u32::from(PPU_HEIGHT), surface_texture)
+            .enable_vsync(false)
+            .texture_format(TextureFormat::Rgba8UnormSrgb)
+            .build()?
+    };
 
-    let window = video_subsystem
-        .window(
-            format!(
-                "Aidan's Big-Brain GB Emulator - Playing {}",
-                cpu.bus.cartridge.get_title()
-            )
-            .as_str(),
-            PPU_WIDTH * PPU_SCALE,
-            PPU_HEIGHT * PPU_SCALE,
-        )
-        .position_centered()
-        .build()
-        .unwrap();
+    let (_stream, stream_handle) = rodio::OutputStream::try_default()?;
 
-    let mut canvas = window.into_canvas().build().unwrap();
+    let (samples_input, samples_output) = samples_queue(2, AUDIO_SAMPLE_FREQUENCY);
+    stream_handle.play_raw(samples_output)?;
 
-    let mut event_pump = sdl_context.event_pump().unwrap();
+    let emulation_start = Instant::now();
+    let mut emulation_steps = 0;
+    let mut audio_steps = 0;
 
-    let start_time = Instant::now();
-
-    let mut audio_timer: u64 = 0;
-    let mut input_timer: u64 = 0;
-
-    for clock in 0.. {
-        // wait while our elapsed time is less than it should be, based on the clock interval.
-        while start_time.elapsed() < Duration::from_nanos(1_000_000_000 * clock / CLOCK_FREQUENCY) {
-        }
-        cpu.step(false);
-
-        audio_timer = audio_timer.saturating_sub(1);
-        if audio_timer == 0 {
-            let sample = cpu.bus.apu.sample();
-            player.queue(&sample);
-            audio_timer = AUDIO_CLOCK_PERIOD;
-        }
-
-        if cpu.bus.ppu.poll_render_ready() {
-            for (y, row) in cpu.bus.ppu.get_buffer().iter().enumerate() {
-                for (x, pixel) in row.iter().cloned().enumerate() {
-                    let color = match pixel {
-                        PaletteColor::White => Color::WHITE,
-                        PaletteColor::LightGray => Color::RGB(170, 170, 170),
-                        PaletteColor::DarkGray => Color::RGB(85, 85, 85),
-                        PaletteColor::Black => Color::BLACK,
+    event_loop.run(move |event, _, control_flow| {
+        match event {
+            Event::MainEventsCleared => {
+                let ppu_buffer = cpu.bus.ppu.get_buffer();
+                for (pixel_idx, pixel) in pixels.get_frame().chunks_exact_mut(4).enumerate() {
+                    let ppu_pixel_x = pixel_idx % usize::from(PPU_WIDTH);
+                    let ppu_pixel_y = pixel_idx / usize::from(PPU_WIDTH);
+                    let pixel_rgba = match ppu_buffer[ppu_pixel_y][ppu_pixel_x] {
+                        PaletteColor::White => [255, 255, 255, 255],
+                        PaletteColor::LightGray => [170, 170, 170, 255],
+                        PaletteColor::DarkGray => [85, 85, 85, 255],
+                        PaletteColor::Black => [0, 0, 0, 255],
                     };
-                    canvas.set_draw_color(color);
-                    canvas.fill_rect(Rect::new(
-                        (x as i32) * (PPU_SCALE as i32),
-                        (y as i32) * (PPU_SCALE as i32),
-                        PPU_SCALE,
-                        PPU_SCALE,
-                    ))?;
+                    pixel.copy_from_slice(&pixel_rgba);
+                }
+
+                pixels.render().expect("failed to render frame");
+
+                // Run the CPU until we have caught up to the proper step.
+                while emulation_start.elapsed()
+                    >= Duration::from_nanos(
+                        1_000_000_000 * emulation_steps / u64::from(CLOCK_FREQUENCY),
+                    )
+                {
+                    cpu.step();
+
+                    // While number of cycles for which we have played audio is less than the
+                    // number of cpu cycles actually run, take another sound sample.
+                    //
+                    // This while loop should never add two samples inside of a single cpu cycle,
+                    // unless the audio sample rate is somehow higher than the cpu frequency.
+                    while (audio_steps * u64::from(CLOCK_FREQUENCY)
+                        / u64::from(AUDIO_SAMPLE_FREQUENCY))
+                        < emulation_steps
+                    {
+                        samples_input.append(cpu.bus.apu.sample());
+                        audio_steps += 1;
+                    }
+
+                    emulation_steps += 1;
                 }
             }
-            canvas.present();
-        }
-
-        input_timer = input_timer.saturating_sub(1);
-        if input_timer == 0 {
-            for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. }
-                    | Event::KeyDown {
-                        keycode: Some(Keycode::Escape),
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::DeviceEvent {
+                event:
+                    DeviceEvent::Key(KeyboardInput {
+                        state,
+                        virtual_keycode: Some(keycode),
                         ..
-                    } => return Ok(()),
-                    Event::KeyDown {
-                        keycode: Some(UP_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => {
-                        cpu.bus.joypad.set_up_pressed(true);
-                    }
-                    Event::KeyDown {
-                        keycode: Some(DOWN_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_down_pressed(true),
-                    Event::KeyDown {
-                        keycode: Some(LEFT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_left_pressed(true),
-                    Event::KeyDown {
-                        keycode: Some(RIGHT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_right_pressed(true),
-                    Event::KeyDown {
-                        keycode: Some(SELECT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => {
-                        cpu.bus.joypad.set_select_pressed(true);
-                    }
-                    Event::KeyDown {
-                        keycode: Some(START_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => {
-                        cpu.bus.joypad.set_start_pressed(true);
-                    }
-                    Event::KeyDown {
-                        keycode: Some(A_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_a_pressed(true),
-                    Event::KeyDown {
-                        keycode: Some(B_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_b_pressed(true),
-                    Event::KeyDown {
-                        keycode: Some(SAVE_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => save_state = cpu.clone(),
-                    Event::KeyDown {
-                        keycode: Some(LOAD_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu = save_state.clone(),
-
-                    Event::KeyUp {
-                        keycode: Some(UP_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_up_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(DOWN_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_down_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(LEFT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_left_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(RIGHT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_right_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(SELECT_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_select_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(START_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_start_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(A_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_a_pressed(false),
-                    Event::KeyUp {
-                        keycode: Some(B_KEYCODE),
-                        repeat: false,
-                        ..
-                    } => cpu.bus.joypad.set_b_pressed(false),
+                    }),
+                ..
+            } => {
+                let pressed = match state {
+                    ElementState::Pressed => true,
+                    ElementState::Released => false,
+                };
+                match keycode {
+                    VirtualKeyCode::Z => cpu.bus.joypad.set_a_pressed(pressed),
+                    VirtualKeyCode::X => cpu.bus.joypad.set_b_pressed(pressed),
+                    VirtualKeyCode::RShift => cpu.bus.joypad.set_select_pressed(pressed),
+                    VirtualKeyCode::Return => cpu.bus.joypad.set_start_pressed(pressed),
+                    VirtualKeyCode::Up => cpu.bus.joypad.set_up_pressed(pressed),
+                    VirtualKeyCode::Right => cpu.bus.joypad.set_right_pressed(pressed),
+                    VirtualKeyCode::Down => cpu.bus.joypad.set_down_pressed(pressed),
+                    VirtualKeyCode::Left => cpu.bus.joypad.set_left_pressed(pressed),
                     _ => {}
-                }
+                };
             }
-
-            input_timer = INPUT_PERIOD;
-        }
-    }
-
-    Ok(())
+            _ => {}
+        };
+    });
 }
 
 #[cfg(test)]
@@ -253,7 +156,7 @@ mod tests {
         let mut cpu = Cpu::new(cartridge);
 
         for _ in 0..75_000_000 {
-            cpu.step(false);
+            cpu.step();
         }
 
         let serial_out = cpu.bus.serial.get_data_written();
@@ -266,7 +169,7 @@ mod tests {
         let mut cpu = Cpu::new(cartridge);
 
         for _ in 0..50_000_000 {
-            cpu.step(false);
+            cpu.step();
         }
 
         assert_eq!(cpu.read_register(cpu::RegisterByte::B), 03);

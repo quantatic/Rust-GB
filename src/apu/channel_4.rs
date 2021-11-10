@@ -1,5 +1,3 @@
-use sdl2::audio;
-
 use crate::CLOCK_FREQUENCY;
 
 use super::{
@@ -7,13 +5,12 @@ use super::{
     THREE_QUARTERS_WAVE_DUTY_WAVEFORM,
 };
 
-const SEQUENCER_CLOCK_FREQUENCY: u64 = 512;
+const SEQUENCER_CLOCK_FREQUENCY: u32 = 512;
 
-const SEQUENCER_CLOCK_PERIOD: u64 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
+const SEQUENCER_CLOCK_PERIOD: u32 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
 
 const LENGTH_COUNTER_CLOCKS: [bool; 8] = [false, false, true, false, true, false, true, false];
 const VOLUME_ENVELOPE_CLOCKS: [bool; 8] = [false, false, false, false, false, false, false, true];
-const SWEEP_CLOCKS: [bool; 8] = [false, false, true, false, false, false, true, false];
 
 #[derive(Clone, Debug, Default)]
 pub struct Channel4 {
@@ -29,7 +26,7 @@ pub struct Channel4 {
     noise_ticks_left: u16,
     frame_sequencer_idx: usize,
 
-    clock: u64,
+    clock: u32,
 
     enabled: bool,
 }
@@ -79,10 +76,6 @@ impl Channel4 {
 
             self.noise_ticks_left =
                 u16::from(self.get_divisor()) << u16::from(self.get_shift_clock_frequency());
-        }
-
-        if self.get_initial_envelope_volume() == 0 {
-            self.set_enabled(false);
         }
 
         self.clock += 1;

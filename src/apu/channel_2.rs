@@ -5,9 +5,9 @@ use super::{
     THREE_QUARTERS_WAVE_DUTY_WAVEFORM,
 };
 
-const SEQUENCER_CLOCK_FREQUENCY: u64 = 512;
+const SEQUENCER_CLOCK_FREQUENCY: u32 = 512;
 
-const SEQUENCER_CLOCK_PERIOD: u64 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
+const SEQUENCER_CLOCK_PERIOD: u32 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
 
 const LENGTH_COUNTER_CLOCKS: [bool; 8] = [false, false, true, false, true, false, true, false];
 const VOLUME_ENVELOPE_CLOCKS: [bool; 8] = [false, false, false, false, false, false, false, true];
@@ -16,7 +16,7 @@ const VOLUME_ENVELOPE_CLOCKS: [bool; 8] = [false, false, false, false, false, fa
 pub struct Channel2 {
     envelope_ticks_left: u8,
     length_counter: u8,
-    clock: u64,
+    clock: u32,
     current_envelope_volume: u8,
 
     sound_length_wave_duty: u8,
@@ -70,10 +70,6 @@ impl Channel2 {
         if self.wave_duty_timer_ticks_left == 0 {
             self.wave_duty_timer_ticks_left = (2048 - self.get_channel_frequency()) * 4;
             self.wave_duty_index = (self.wave_duty_index + 1) % 8;
-        }
-
-        if self.get_initial_envelope_volume() == 0 {
-            self.set_enabled(false);
         }
 
         self.clock += 1;
@@ -133,10 +129,11 @@ impl Channel2 {
     pub fn write_frequency_high(&mut self, value: u8) {
         const FREQUENCY_HIGH_ENABLED_MASK: u8 = 1 << 7;
 
+        self.frequency_high = value;
+
         if (value & FREQUENCY_HIGH_ENABLED_MASK) == FREQUENCY_HIGH_ENABLED_MASK {
             self.set_enabled(true);
         }
-        self.frequency_high = value;
     }
 }
 
@@ -188,8 +185,7 @@ impl Channel2 {
     fn get_channel_frequency(&self) -> u16 {
         let channel_frequency_low = self.frequency_low;
         let channel_frequency_high = self.frequency_high & Self::CHANNEL_FREQUENCY_HIGH_MASK;
-        let channel_frequency = u16::from_be_bytes([channel_frequency_high, channel_frequency_low]);
-        channel_frequency
+        u16::from_be_bytes([channel_frequency_high, channel_frequency_low])
     }
 
     fn write_channel_frequency(&mut self, value: u16) {

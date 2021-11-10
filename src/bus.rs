@@ -152,8 +152,8 @@ impl Bus {
             0xFF44 => self.ppu.read_lcd_y(),
             0xFF45 => self.ppu.read_lcd_y_compare(),
             0xFF47 => self.ppu.read_bg_palette(),
-            0xFF48 => self.ppu.read_obj_palette_1(),
-            0xFF49 => self.ppu.read_obj_palette_2(),
+            0xFF48 => self.ppu.read_obj_palette_0(),
+            0xFF49 => self.ppu.read_obj_palette_1(),
             0xFF4A => self.ppu.read_window_y(),
             0xFF4B => self.ppu.read_window_x(),
             0xFF4D => {
@@ -238,8 +238,8 @@ impl Bus {
                 }
             }
             0xFF47 => self.ppu.write_bg_palette(value),
-            0xFF48 => self.ppu.write_obj_palette_1(value),
-            0xFF49 => self.ppu.write_obj_palette_2(value),
+            0xFF48 => self.ppu.write_obj_palette_0(value),
+            0xFF49 => self.ppu.write_obj_palette_1(value),
             0xFF4A => self.ppu.write_window_y(value),
             0xFF4B => self.ppu.write_window_x(value),
             0xFF4D => eprintln!("writing 0x{:02X} to unimplemented KEY1", value),

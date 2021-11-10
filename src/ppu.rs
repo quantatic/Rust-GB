@@ -53,7 +53,7 @@ impl SpriteAttributeInfo {
 
     fn use_low_palette(&self) -> bool {
         const LOW_PALETTE_MASK: u8 = 1 << 4;
-        (self.flags & LOW_PALETTE_MASK) != 0
+        (self.flags & LOW_PALETTE_MASK) == 0
     }
 }
 
@@ -79,8 +79,8 @@ pub struct Ppu {
     window_y: u8,
     buffer: [[PaletteColor; 160]; 144], // access as buffer[y][x]
     bg_palette: [PaletteColor; 4],
+    obj_palette_0: [PaletteColor; 4],
     obj_palette_1: [PaletteColor; 4],
-    obj_palette_2: [PaletteColor; 4],
     scanline_seen_sprites: HashSet<usize>,
     should_render: bool,
 }
@@ -108,8 +108,8 @@ impl Default for Ppu {
             window_y: Default::default(),
             buffer: [[PaletteColor::White; 160]; 144],
             bg_palette: [PaletteColor::White; 4],
+            obj_palette_0: [PaletteColor::White; 4],
             obj_palette_1: [PaletteColor::White; 4],
-            obj_palette_2: [PaletteColor::White; 4],
             scanline_seen_sprites: Default::default(),
             should_render: false,
         }
@@ -241,11 +241,6 @@ impl Ppu {
 
                 if self.get_obj_enable() {
                     for (sprite_idx, attribute_info) in self.object_attributes.iter().enumerate() {
-                        if attribute_info.get_bg_window_over_obj() && non_zero_bg_window_pixel_drawn
-                        {
-                            continue;
-                        }
-
                         match self.get_obj_size() {
                             ObjSize::EightByEight => {
                                 if buffer_y + 16 >= attribute_info.y_position
@@ -261,6 +256,8 @@ impl Ppu {
 
                                     if buffer_x + 8 >= attribute_info.x_position
                                         && buffer_x < attribute_info.x_position
+                                        && !(attribute_info.get_bg_window_over_obj()
+                                            && non_zero_bg_window_pixel_drawn)
                                     {
                                         let sprite_y_offset = if attribute_info.get_y_flip() {
                                             7 - (buffer_y + 16 - attribute_info.y_position)
@@ -292,7 +289,7 @@ impl Ppu {
 
                                         if pixel_palette_idx != 0 {
                                             let pixel_color = if attribute_info.use_low_palette() {
-                                                self.obj_palette_2[pixel_palette_idx]
+                                                self.obj_palette_0[pixel_palette_idx]
                                             } else {
                                                 self.obj_palette_1[pixel_palette_idx]
                                             };
@@ -316,8 +313,11 @@ impl Ppu {
                                             self.scanline_seen_sprites.insert(sprite_idx);
                                         }
                                     }
+
                                     if buffer_x + 8 >= attribute_info.x_position
                                         && buffer_x < attribute_info.x_position
+                                        && !(attribute_info.get_bg_window_over_obj()
+                                            && non_zero_bg_window_pixel_drawn)
                                     {
                                         let sprite_y_offset = if attribute_info.get_y_flip() {
                                             15 - (buffer_y + 16 - attribute_info.y_position)
@@ -352,7 +352,7 @@ impl Ppu {
 
                                         if pixel_palette_idx != 0 {
                                             let pixel_color = if attribute_info.use_low_palette() {
-                                                self.obj_palette_2[pixel_palette_idx]
+                                                self.obj_palette_0[pixel_palette_idx]
                                             } else {
                                                 self.obj_palette_1[pixel_palette_idx]
                                             };
@@ -570,10 +570,9 @@ impl Ppu {
     }
 
     fn get_window_displayed(&self) -> bool {
-        let result = self.window_x_condition_triggered
+        self.window_x_condition_triggered
             && self.window_y_condition_triggered
-            && self.get_window_enable();
-        result
+            && self.get_window_enable()
     }
 
     fn get_bg_window_tile_data(&self, tile_id: u8) -> &[u8] {
@@ -684,14 +683,14 @@ impl Ppu {
     pub fn read_bg_palette(&self) -> u8 {
         let mut result = 0;
         for color in self.bg_palette.iter().rev() {
+            result <<= 2;
+
             result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
                 PaletteColor::DarkGray => 0b10,
                 PaletteColor::Black => 0b11,
             };
-
-            result <<= 2;
         }
 
         result
@@ -711,24 +710,24 @@ impl Ppu {
         }
     }
 
-    pub fn read_obj_palette_1(&self) -> u8 {
+    pub fn read_obj_palette_0(&self) -> u8 {
         let mut result = 0;
-        for color in self.obj_palette_1.iter().rev() {
+        for color in self.obj_palette_0.iter().rev() {
+            result <<= 2;
+
             result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
                 PaletteColor::DarkGray => 0b10,
                 PaletteColor::Black => 0b11,
             };
-
-            result <<= 2;
         }
 
         result
     }
 
-    pub fn write_obj_palette_1(&mut self, mut value: u8) {
-        for palette in self.obj_palette_1.iter_mut() {
+    pub fn write_obj_palette_0(&mut self, mut value: u8) {
+        for palette in self.obj_palette_0.iter_mut() {
             *palette = match value & 0b11 {
                 0b00 => PaletteColor::White,
                 0b01 => PaletteColor::LightGray,
@@ -741,24 +740,24 @@ impl Ppu {
         }
     }
 
-    pub fn read_obj_palette_2(&self) -> u8 {
+    pub fn read_obj_palette_1(&self) -> u8 {
         let mut result = 0;
-        for color in self.obj_palette_2.iter().rev() {
+        for color in self.obj_palette_1.iter().rev() {
+            result <<= 2;
+
             result |= match color {
                 PaletteColor::White => 0b00,
                 PaletteColor::LightGray => 0b01,
                 PaletteColor::DarkGray => 0b10,
                 PaletteColor::Black => 0b11,
             };
-
-            result <<= 2;
         }
 
         result
     }
 
-    pub fn write_obj_palette_2(&mut self, mut value: u8) {
-        for palette in self.obj_palette_2.iter_mut() {
+    pub fn write_obj_palette_1(&mut self, mut value: u8) {
+        for palette in self.obj_palette_1.iter_mut() {
             *palette = match value & 0b11 {
                 0b00 => PaletteColor::White,
                 0b01 => PaletteColor::LightGray,
