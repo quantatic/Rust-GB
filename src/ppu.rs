@@ -82,7 +82,6 @@ pub struct Ppu {
     obj_palette_0: [PaletteColor; 4],
     obj_palette_1: [PaletteColor; 4],
     scanline_seen_sprites: HashSet<usize>,
-    should_render: bool,
 }
 
 impl Default for Ppu {
@@ -111,7 +110,6 @@ impl Default for Ppu {
             obj_palette_0: [PaletteColor::White; 4],
             obj_palette_1: [PaletteColor::White; 4],
             scanline_seen_sprites: Default::default(),
-            should_render: false,
         }
     }
 }
@@ -129,17 +127,33 @@ impl Ppu {
             self.set_stat_lyc_equals_ly(false);
         }
 
-        if self.lcd_y == 0 && self.dot == 0 {
-            self.should_render = false;
-        }
-
         if self.lcd_y < 144 {
             if self.dot == 0 {
                 self.set_stat_mode(PpuMode::OAMSearch);
                 self.window_y_condition_triggered |= self.lcd_y == self.window_y
             } else if self.dot == 80 {
                 self.set_stat_mode(PpuMode::PixelTransfer);
+
                 self.scanline_seen_sprites.clear();
+
+                let obj_size = self.get_obj_size();
+                self.scanline_seen_sprites.extend(
+                    self.object_attributes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, attribute_info)| match obj_size {
+                            ObjSize::EightByEight => {
+                                self.lcd_y + 16 >= attribute_info.y_position
+                                    && self.lcd_y + 8 < attribute_info.y_position
+                            }
+                            ObjSize::EightBySixteen => {
+                                self.lcd_y + 16 >= attribute_info.y_position
+                                    && self.lcd_y < attribute_info.y_position
+                            }
+                        })
+                        .map(|(i, _)| i)
+                        .take(10),
+                );
             } else if self.dot == 252 {
                 self.set_stat_mode(PpuMode::HBlank);
 
@@ -156,7 +170,6 @@ impl Ppu {
                 self.set_stat_mode(PpuMode::VBlank);
                 self.vblank_interrupt_waiting = true;
                 self.window_y_condition_triggered = false;
-                self.should_render = true;
             }
         }
 
@@ -240,54 +253,63 @@ impl Ppu {
                 }
 
                 if self.get_obj_enable() {
+                    // Sprite selection priorities X position first, then OAM index. We iterate through
+                    // the OAM in order, so we only have to consider X position (in a tie, don't render
+                    // because a pixel at a lower OAM index has already been rendered).
+                    //
+                    // Whenever we might choose a sprite's pixel, we check that sprite's x position against
+                    // the alrady-chosen pixel's sprite (if any). If none exists, this pixel will alway
+                    // be chosen. If this x is less than the already-chosen sprite's x, then the existing
+                    // pixel will be replaced with this sprite's pixel.
+                    //
+                    // Note that this check must occur before the "BG over OBJ" check is done, and the chosen
+                    // sprite x may be updated even when the pixel is not actually rendered due to the
+                    // "BG over OBJ" check failing.
+                    let mut chosen_sprite_x = None;
                     for (sprite_idx, attribute_info) in self.object_attributes.iter().enumerate() {
                         match self.get_obj_size() {
                             ObjSize::EightByEight => {
                                 if buffer_y + 16 >= attribute_info.y_position
                                     && buffer_y + 8 < attribute_info.y_position
+                                    && buffer_x + 8 >= attribute_info.x_position
+                                    && buffer_x < attribute_info.x_position
+                                    && self.scanline_seen_sprites.contains(&sprite_idx)
                                 {
-                                    if !self.scanline_seen_sprites.contains(&sprite_idx) {
-                                        if self.scanline_seen_sprites.len() >= 10 {
-                                            continue;
-                                        } else {
-                                            self.scanline_seen_sprites.insert(sprite_idx);
-                                        }
-                                    }
+                                    let sprite_y_offset = if attribute_info.get_y_flip() {
+                                        7 - (buffer_y + 16 - attribute_info.y_position)
+                                    } else {
+                                        buffer_y + 16 - attribute_info.y_position
+                                    };
 
-                                    if buffer_x + 8 >= attribute_info.x_position
-                                        && buffer_x < attribute_info.x_position
-                                        && !(attribute_info.get_bg_window_over_obj()
-                                            && non_zero_bg_window_pixel_drawn)
+                                    let sprite_x_offset = if attribute_info.get_x_flip() {
+                                        7 - (buffer_x + 8 - attribute_info.x_position)
+                                    } else {
+                                        buffer_x + 8 - attribute_info.x_position
+                                    };
+
+                                    let sprite_data =
+                                        self.get_obj_tile_data(attribute_info.tile_index);
+
+                                    let lsb_row_color =
+                                        sprite_data[usize::from(sprite_y_offset) * 2];
+                                    let msb_row_color =
+                                        sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
+
+                                    let lsb_pixel_color =
+                                        (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                                    let msb_pixel_color =
+                                        (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                                    let pixel_palette_idx = (usize::from(msb_pixel_color) << 1)
+                                        | usize::from(lsb_pixel_color);
+
+                                    if pixel_palette_idx != 0
+                                        && chosen_sprite_x
+                                            .map_or(true, |old_x| old_x > attribute_info.x_position)
                                     {
-                                        let sprite_y_offset = if attribute_info.get_y_flip() {
-                                            7 - (buffer_y + 16 - attribute_info.y_position)
-                                        } else {
-                                            buffer_y + 16 - attribute_info.y_position
-                                        };
-
-                                        let sprite_x_offset = if attribute_info.get_x_flip() {
-                                            7 - (buffer_x + 8 - attribute_info.x_position)
-                                        } else {
-                                            buffer_x + 8 - attribute_info.x_position
-                                        };
-
-                                        let sprite_data =
-                                            self.get_obj_tile_data(attribute_info.tile_index);
-
-                                        let lsb_row_color =
-                                            sprite_data[usize::from(sprite_y_offset) * 2];
-                                        let msb_row_color =
-                                            sprite_data[(usize::from(sprite_y_offset) * 2) + 1];
-
-                                        let lsb_pixel_color =
-                                            (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-                                        let msb_pixel_color =
-                                            (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-
-                                        let pixel_palette_idx = (usize::from(msb_pixel_color) << 1)
-                                            | usize::from(lsb_pixel_color);
-
-                                        if pixel_palette_idx != 0 {
+                                        if !(attribute_info.get_bg_window_over_obj()
+                                            && non_zero_bg_window_pixel_drawn)
+                                        {
                                             let pixel_color = if attribute_info.use_low_palette() {
                                                 self.obj_palette_0[pixel_palette_idx]
                                             } else {
@@ -296,61 +318,56 @@ impl Ppu {
 
                                             self.buffer[usize::from(buffer_y)]
                                                 [usize::from(buffer_x)] = pixel_color;
-
-                                            break;
                                         }
+                                        chosen_sprite_x = Some(attribute_info.x_position);
                                     }
                                 }
                             }
                             ObjSize::EightBySixteen => {
                                 if buffer_y + 16 >= attribute_info.y_position
                                     && buffer_y < attribute_info.y_position
+                                    && buffer_x + 8 >= attribute_info.x_position
+                                    && buffer_x < attribute_info.x_position
+                                    && self.scanline_seen_sprites.contains(&sprite_idx)
                                 {
-                                    if !self.scanline_seen_sprites.contains(&sprite_idx) {
-                                        if self.scanline_seen_sprites.len() >= 10 {
-                                            continue;
-                                        } else {
-                                            self.scanline_seen_sprites.insert(sprite_idx);
-                                        }
-                                    }
+                                    let sprite_y_offset = if attribute_info.get_y_flip() {
+                                        15 - (buffer_y + 16 - attribute_info.y_position)
+                                    } else {
+                                        buffer_y + 16 - attribute_info.y_position
+                                    };
 
-                                    if buffer_x + 8 >= attribute_info.x_position
-                                        && buffer_x < attribute_info.x_position
-                                        && !(attribute_info.get_bg_window_over_obj()
-                                            && non_zero_bg_window_pixel_drawn)
+                                    let sprite_x_offset = if attribute_info.get_x_flip() {
+                                        7 - (buffer_x + 8 - attribute_info.x_position)
+                                    } else {
+                                        buffer_x + 8 - attribute_info.x_position
+                                    };
+
+                                    let sprite_data = if sprite_y_offset < 8 {
+                                        self.get_obj_tile_data(attribute_info.tile_index & 0xFE)
+                                    } else {
+                                        self.get_obj_tile_data(attribute_info.tile_index | 0x01)
+                                    };
+
+                                    let lsb_row_color =
+                                        sprite_data[usize::from(sprite_y_offset % 8) * 2];
+                                    let msb_row_color =
+                                        sprite_data[(usize::from(sprite_y_offset % 8) * 2) + 1];
+
+                                    let lsb_pixel_color =
+                                        (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+                                    let msb_pixel_color =
+                                        (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
+
+                                    let pixel_palette_idx = (usize::from(msb_pixel_color) << 1)
+                                        | usize::from(lsb_pixel_color);
+
+                                    if pixel_palette_idx != 0
+                                        && chosen_sprite_x
+                                            .map_or(true, |old_x| old_x > attribute_info.x_position)
                                     {
-                                        let sprite_y_offset = if attribute_info.get_y_flip() {
-                                            15 - (buffer_y + 16 - attribute_info.y_position)
-                                        } else {
-                                            buffer_y + 16 - attribute_info.y_position
-                                        };
-
-                                        let sprite_x_offset = if attribute_info.get_x_flip() {
-                                            7 - (buffer_x + 8 - attribute_info.x_position)
-                                        } else {
-                                            buffer_x + 8 - attribute_info.x_position
-                                        };
-
-                                        let sprite_data = if sprite_y_offset < 8 {
-                                            self.get_obj_tile_data(attribute_info.tile_index & 0xFE)
-                                        } else {
-                                            self.get_obj_tile_data(attribute_info.tile_index | 0x01)
-                                        };
-
-                                        let lsb_row_color =
-                                            sprite_data[usize::from(sprite_y_offset % 8) * 2];
-                                        let msb_row_color =
-                                            sprite_data[(usize::from(sprite_y_offset % 8) * 2) + 1];
-
-                                        let lsb_pixel_color =
-                                            (lsb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-                                        let msb_pixel_color =
-                                            (msb_row_color & (1 << (7 - sprite_x_offset))) != 0;
-
-                                        let pixel_palette_idx = (usize::from(msb_pixel_color) << 1)
-                                            | usize::from(lsb_pixel_color);
-
-                                        if pixel_palette_idx != 0 {
+                                        if !(attribute_info.get_bg_window_over_obj()
+                                            && non_zero_bg_window_pixel_drawn)
+                                        {
                                             let pixel_color = if attribute_info.use_low_palette() {
                                                 self.obj_palette_0[pixel_palette_idx]
                                             } else {
@@ -359,9 +376,8 @@ impl Ppu {
 
                                             self.buffer[usize::from(buffer_y)]
                                                 [usize::from(buffer_x)] = pixel_color;
-
-                                            break;
                                         }
+                                        chosen_sprite_x = Some(attribute_info.x_position);
                                     }
                                 }
                             }
@@ -380,15 +396,6 @@ impl Ppu {
                 self.lcd_y = 0;
                 self.window_lcd_y = 0;
             }
-        }
-    }
-
-    pub fn poll_render_ready(&mut self) -> bool {
-        if self.should_render {
-            self.should_render = false;
-            true
-        } else {
-            false
         }
     }
 

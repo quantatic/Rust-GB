@@ -265,7 +265,7 @@ impl Cpu {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             af: 0x01B0,
-            bc: 0x0013,
+            bc: 0x0003,
             de: 0x00D8,
             hl: 0x014D,
             sp: 0xFFFE,
