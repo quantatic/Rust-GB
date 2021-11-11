@@ -12,6 +12,7 @@ enum CartridgeType {
     NoMbc(NoMbc),
     Mbc1(Mbc1),
     Mbc3(Mbc3),
+    Mbc5(Mbc5),
 }
 
 impl Cartridge {
@@ -20,6 +21,7 @@ impl Cartridge {
             CartridgeType::NoMbc(no_mbc) => no_mbc.read(address),
             CartridgeType::Mbc1(mbc_1) => mbc_1.read(address),
             CartridgeType::Mbc3(mbc_3) => mbc_3.read(address),
+            CartridgeType::Mbc5(mbc_5) => mbc_5.read(address),
         }
     }
 
@@ -28,6 +30,7 @@ impl Cartridge {
             CartridgeType::NoMbc(no_mbc) => no_mbc.write(value, address),
             CartridgeType::Mbc1(mbc_1) => mbc_1.write(value, address),
             CartridgeType::Mbc3(mbc_3) => mbc_3.write(value, address),
+            CartridgeType::Mbc5(mbc_5) => mbc_5.write(value, address),
         }
     }
 
@@ -36,6 +39,7 @@ impl Cartridge {
             CartridgeType::NoMbc(_) => {}
             CartridgeType::Mbc1(_) => {}
             CartridgeType::Mbc3(mbc_3) => mbc_3.step(),
+            &mut CartridgeType::Mbc5(_) => {}
         }
     }
 
@@ -399,6 +403,91 @@ impl Mbc3 {
     }
 }
 
+#[derive(Clone)]
+struct Mbc5 {
+    rom: Vec<[u8; 0x4000]>,
+    rom_banks: usize,
+    rom_bank_low: usize,
+    rom_bank_high: usize,
+    ram: Vec<[u8; 0x2000]>,
+    ram_banks: usize,
+    ram_bank: usize,
+    ram_enabled: bool,
+}
+
+impl Mbc5 {
+    const EXPECTED_RAM_SIZES: [usize; 3] = [0x0000, 0x2000, 0x8000];
+
+    fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
+        if !Self::EXPECTED_RAM_SIZES.contains(&ram_size) {
+            let expected_string = format!(
+                "[{}]",
+                Self::EXPECTED_RAM_SIZES
+                    .map(|size| format!("0x{:04X}", size))
+                    .join(", ")
+            );
+
+            return Err(format!(
+                "expected ram size to be one of {}, but got 0x{:04X}",
+                expected_string, ram_size
+            )
+            .into());
+        }
+
+        let rom: Vec<[u8; 0x4000]> = data
+            .chunks(0x4000)
+            .map(<[u8; 0x4000]>::try_from)
+            .collect::<Result<_, _>>()?;
+
+        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_size / 0x2000];
+
+        Ok(Self {
+            rom_banks: rom.len(),
+            rom,
+            rom_bank_low: 1,
+            rom_bank_high: 0,
+            ram_banks: ram.len(),
+            ram,
+            ram_bank: 0,
+            ram_enabled: false,
+        })
+    }
+
+    fn read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => self.rom[0][usize::from(address)],
+            0x4000..=0x7FFF => {
+                let bank_number = self.rom_bank_low | (self.rom_bank_high << 8);
+                self.rom[bank_number % self.rom_banks][usize::from(address - 0x4000)]
+            }
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    self.ram[self.ram_bank % self.ram_banks][usize::from(address - 0xA000)]
+                } else {
+                    0xFF
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn write(&mut self, value: u8, address: u16) {
+        match address {
+            0x0000..=0x1FFF => self.ram_enabled = (value & 0xF) == 0x0A,
+            0x2000..=0x2FFF => self.rom_bank_low = usize::from(value),
+            0x3000..=0x3FFF => self.rom_bank_high = usize::from(value & 0b1),
+            0x4000..=0x5FFF => self.ram_bank = usize::from(value & 0x0F),
+            0x6000 => {}
+            0xA000..=0xBFFF => {
+                if self.ram_enabled {
+                    self.ram[self.ram_bank % self.ram_banks][usize::from(address - 0xA000)] = value;
+                }
+            }
+            _ => unreachable!("unknown cartridge write: 0x{:04X}", address),
+        }
+    }
+}
+
 impl Cartridge {
     pub fn new(data: &[u8]) -> Result<Self, Box<dyn Error>> {
         assert!(data.len() >= 0x8000);
@@ -479,6 +568,9 @@ impl Cartridge {
             0x00 => CartridgeType::NoMbc(NoMbc::new(data, ram_size)?),
             0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data, ram_size)?),
             0x0F | 0x10 | 0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data)?),
+            0x19 | 0x1A | 0x1B | 0x1C | 0x1D | 0x1E => {
+                CartridgeType::Mbc5(Mbc5::new(data, ram_size)?)
+            }
             _ => todo!(),
         };
 

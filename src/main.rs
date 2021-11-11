@@ -25,7 +25,7 @@ use std::convert::TryInto;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-const ROM: &[u8] = include_bytes!("../pokemon_red.gb");
+const ROM: &[u8] = include_bytes!("../links_awakening.gb");
 
 const PPU_WIDTH: u16 = 160;
 const PPU_HEIGHT: u16 = 144;
@@ -69,6 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut emulation_steps = 0;
     let mut audio_steps = 0;
 
+    let mut last_fps_calculation = Instant::now();
+    let mut frames_since_fps_calculation = 0;
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::MainEventsCleared => {
@@ -109,6 +111,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     emulation_steps += 1;
+                }
+
+                frames_since_fps_calculation += 1;
+
+                let time_since_fps_calculation = last_fps_calculation.elapsed();
+                if time_since_fps_calculation.as_secs() >= 1 {
+                    let fps = 1_000_000_000 * frames_since_fps_calculation
+                        / time_since_fps_calculation.as_nanos();
+                    window.set_title(format!("FPS: {:03}", fps).as_str());
+                    frames_since_fps_calculation = 0;
+                    last_fps_calculation = Instant::now();
                 }
             }
             Event::WindowEvent {
@@ -309,6 +322,36 @@ mod tests {
     #[test]
     fn test_mbc1_rom_16mb() {
         test_mooneye_rom_passed(include_bytes!("../tests/mbc1_rom_16mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_512kb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_512kb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_1mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_1mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_2mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_2mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_4mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_4mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_8mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_8mb.gb"));
+    }
+
+    #[test]
+    fn test_mbc5_rom_16mb() {
+        test_mooneye_rom_passed(include_bytes!("../tests/mbc5_rom_16mb.gb"));
     }
 
     #[test]

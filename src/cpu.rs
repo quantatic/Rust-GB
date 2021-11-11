@@ -264,15 +264,15 @@ pub enum AddressingModeWord {
 impl Cpu {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
-            af: 0x01B0,
-            bc: 0x0003,
+            af: 0xFFB0,
+            bc: 0x0013,
             de: 0x00D8,
             hl: 0x014D,
             sp: 0xFFFE,
             pc: 0x100,
             bus: Bus::new(cartridge),
-            cycles_delay: Default::default(),
-            halted: Default::default(),
+            cycles_delay: 0,
+            halted: false,
         }
     }
 }

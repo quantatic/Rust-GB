@@ -162,7 +162,10 @@ impl Bus {
             }
             0xFF80..=0xFFFE => self.high_ram[usize::from(address - 0xFF80)],
             0xFFFF => self.interrupt_enable,
-            _ => todo!("read from 0x{:02X}", address),
+            _ => {
+                println!("read from 0x{:02X}", address);
+                0
+            }
         }
     }
 
