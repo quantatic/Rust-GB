@@ -8,24 +8,21 @@ mod samples_queue;
 mod serial;
 mod timer;
 
-use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::ppu::PaletteColor;
 use crate::samples_queue::samples_queue;
 
-use pixels::{wgpu::TextureFormat, Pixels, PixelsBuilder, SurfaceTexture};
-use rodio::Sample;
+use pixels::{wgpu::TextureFormat, PixelsBuilder, SurfaceTexture};
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use std::convert::TryInto;
 use std::error::Error;
+use std::fs::File;
+use std::io::Read;
 use std::time::{Duration, Instant};
-
-const ROM: &[u8] = include_bytes!("../links_awakening.gb");
 
 const PPU_WIDTH: u16 = 160;
 const PPU_HEIGHT: u16 = 144;
@@ -33,11 +30,18 @@ const PPU_SCALE: u16 = 4;
 
 const CLOCK_FREQUENCY: u32 = 4_194_304;
 const AUDIO_SAMPLE_FREQUENCY: u32 = 44_100;
-const CLOCKS_PER_FRAME: u32 = 70_224;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() != 2 {
+        return Err(format!("usage: ./{} <rom_file>", args[0]).into());
+    }
+    let mut rom = Vec::new();
+    File::open(&args[1])?.read_to_end(&mut rom)?;
+
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
-    let cartridge = Cartridge::new(ROM)?;
+    let cartridge = Cartridge::new(&rom)?;
     let mut cpu = Cpu::new(cartridge);
     let mut save_state = cpu.clone();
 
@@ -74,20 +78,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::MainEventsCleared => {
-                let ppu_buffer = cpu.bus.ppu.get_buffer();
-                for (pixel_idx, pixel) in pixels.get_frame().chunks_exact_mut(4).enumerate() {
-                    let ppu_pixel_x = pixel_idx % usize::from(PPU_WIDTH);
-                    let ppu_pixel_y = pixel_idx / usize::from(PPU_WIDTH);
-                    let pixel_rgba = match ppu_buffer[ppu_pixel_y][ppu_pixel_x] {
-                        PaletteColor::White => [255, 255, 255, 255],
-                        PaletteColor::LightGray => [170, 170, 170, 255],
-                        PaletteColor::DarkGray => [85, 85, 85, 255],
-                        PaletteColor::Black => [0, 0, 0, 255],
-                    };
-                    pixel.copy_from_slice(&pixel_rgba);
-                }
+                if cpu.bus.ppu.get_lcd_ppu_enable() {
+                    let ppu_buffer = cpu.bus.ppu.get_buffer();
+                    for (pixel_idx, pixel) in pixels.get_frame().chunks_exact_mut(4).enumerate() {
+                        let ppu_pixel_x = pixel_idx % usize::from(PPU_WIDTH);
+                        let ppu_pixel_y = pixel_idx / usize::from(PPU_WIDTH);
+                        let pixel_rgba = match ppu_buffer[ppu_pixel_y][ppu_pixel_x] {
+                            PaletteColor::White => [255, 255, 255, 255],
+                            PaletteColor::LightGray => [170, 170, 170, 255],
+                            PaletteColor::DarkGray => [85, 85, 85, 255],
+                            PaletteColor::Black => [0, 0, 0, 255],
+                        };
+                        pixel.copy_from_slice(&pixel_rgba);
+                    }
 
-                pixels.render().expect("failed to render frame");
+                    pixels.render().expect("failed to render frame");
+                }
 
                 // Run the CPU until we have caught up to the proper step.
                 while emulation_start.elapsed()
@@ -168,7 +174,7 @@ mod tests {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
-        for _ in 0..75_000_000 {
+        for _ in 0..100_000_000 {
             cpu.step();
         }
 

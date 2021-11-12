@@ -525,33 +525,6 @@ impl Cartridge {
             _ => unreachable!(),
         };
 
-        let mut actual_header_checksum: u8 = 0;
-        for byte in data[0x134..=0x14C].iter().copied() {
-            actual_header_checksum = actual_header_checksum.wrapping_sub(byte).wrapping_sub(1);
-        }
-        let expected_header_checksum = data[0x14D];
-        if actual_header_checksum != expected_header_checksum {
-            return Err(format!(
-                "header checksum expected 0x{:02X}, but got 0x{:02X}",
-                expected_header_checksum, actual_header_checksum
-            )
-            .into());
-        }
-
-        let mut actual_global_checksum: u16 = 0;
-        for (i, byte) in data.iter().copied().enumerate() {
-            if i != 0x14E && i != 0x14F {
-                actual_global_checksum = actual_global_checksum.wrapping_add(u16::from(byte));
-            }
-        }
-        let expected_global_checksum = u16::from_be_bytes([data[0x14E], data[0x14F]]);
-        if actual_global_checksum != expected_global_checksum {
-            eprintln!(
-                "global checksum expected 0x{:02X}, but got 0x{:02X}",
-                expected_global_checksum, actual_global_checksum
-            )
-        }
-
         let title: String = data[0x134..=0x143]
             .iter()
             .copied()

@@ -557,7 +557,7 @@ impl Ppu {
         }
     }
 
-    fn get_lcd_ppu_enable(&self) -> bool {
+    pub fn get_lcd_ppu_enable(&self) -> bool {
         const LCD_PPU_ENABLE_MASK: u8 = 1 << 7;
         (self.lcd_control & LCD_PPU_ENABLE_MASK) != 0
     }

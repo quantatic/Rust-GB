@@ -1,11 +1,8 @@
 use crate::{
-    apu::Apu,
-    cartridge::{self, Cartridge},
-    joypad::Joypad,
-    ppu::Ppu,
-    serial::Serial,
-    timer::Timer,
+    apu::Apu, cartridge::Cartridge, joypad::Joypad, ppu::Ppu, serial::Serial, timer::Timer,
 };
+
+const BOOT_ROM: &[u8; 256] = include_bytes!("boot_rom.bin");
 
 #[derive(Clone, Copy, Debug)]
 pub enum InterruptType {
@@ -23,6 +20,7 @@ pub struct Bus {
     interrupt_master_enable: bool,
     low_ram: [u8; 0x2000],
     high_ram: [u8; 0x7F],
+    boot_rom_enabled: bool,
     pub cartridge: Cartridge,
     pub timer: Timer,
     pub serial: Serial,
@@ -34,11 +32,12 @@ pub struct Bus {
 impl Bus {
     pub fn new(cartridge: Cartridge) -> Self {
         let mut result = Self {
-            interrupt_enable: Default::default(),
-            interrupt_flag: Default::default(),
-            interrupt_master_enable: Default::default(),
+            interrupt_enable: 0,
+            interrupt_flag: 0,
+            interrupt_master_enable: false,
             low_ram: [0; 0x2000],
             high_ram: [0; 0x7F],
+            boot_rom_enabled: true,
             timer: Default::default(),
             serial: Default::default(),
             ppu: Default::default(),
@@ -46,38 +45,6 @@ impl Bus {
             apu: Default::default(),
             cartridge,
         };
-
-        result.write_byte_address(0x00, 0xFF05);
-        result.write_byte_address(0x00, 0xFF06);
-        result.write_byte_address(0x00, 0xFF07);
-        result.write_byte_address(0x80, 0xFF10);
-        result.write_byte_address(0xBF, 0xFF11);
-        result.write_byte_address(0xF3, 0xFF12);
-        result.write_byte_address(0xBF, 0xFF14);
-        result.write_byte_address(0x3F, 0xFF16);
-        result.write_byte_address(0x00, 0xFF17);
-        result.write_byte_address(0xBF, 0xFF19);
-        result.write_byte_address(0x7F, 0xFF1A);
-        result.write_byte_address(0xFF, 0xFF1B);
-        result.write_byte_address(0x9F, 0xFF1C);
-        result.write_byte_address(0xBF, 0xFF1E);
-        result.write_byte_address(0xFF, 0xFF20);
-        result.write_byte_address(0x00, 0xFF21);
-        result.write_byte_address(0x00, 0xFF22);
-        result.write_byte_address(0xBF, 0xFF23);
-        result.write_byte_address(0x77, 0xFF24);
-        result.write_byte_address(0xF3, 0xFF25);
-        result.write_byte_address(0xF1, 0xFF26);
-        result.write_byte_address(0x91, 0xFF40);
-        result.write_byte_address(0x00, 0xFF42);
-        result.write_byte_address(0x00, 0xFF43);
-        result.write_byte_address(0x00, 0xFF45);
-        result.write_byte_address(0xFC, 0xFF47);
-        result.write_byte_address(0xFF, 0xFF48);
-        result.write_byte_address(0xFF, 0xFF49);
-        result.write_byte_address(0x00, 0xFF4A);
-        result.write_byte_address(0x00, 0xFF4B);
-        result.write_byte_address(0x00, 0xFFFF);
 
         result
     }
@@ -109,7 +76,14 @@ impl Bus {
 
     pub fn read_byte_address(&self, address: u16) -> u8 {
         match address {
-            0x0000..=0x7FFF => self.cartridge.read(address),
+            0x0000..=0x00FF => {
+                if self.boot_rom_enabled {
+                    BOOT_ROM[usize::from(address)]
+                } else {
+                    self.cartridge.read(address)
+                }
+            }
+            0x0100..=0x7FFF => self.cartridge.read(address),
             0x8000..=0x97FF => self.ppu.read_character_ram(address - 0x8000),
             0x9800..=0x9BFF => self.ppu.read_bg_map_data_1(address - 0x9800),
             0x9C00..=0x9FFF => self.ppu.read_bg_map_data_2(address - 0x9C00),
@@ -246,6 +220,9 @@ impl Bus {
             0xFF4A => self.ppu.write_window_y(value),
             0xFF4B => self.ppu.write_window_x(value),
             0xFF4D => eprintln!("writing 0x{:02X} to unimplemented KEY1", value),
+            0xFF50 => {
+                self.boot_rom_enabled = value == 0 // disable boot rom on non-zero write
+            }
             0xFF80..=0xFFFE => {
                 self.high_ram[usize::from(address - 0xFF80)] = value;
             }

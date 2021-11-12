@@ -93,9 +93,9 @@ impl Apu {
             left_output *= f32::from(self.get_left_output_volume() + 1);
             right_output *= f32::from(self.get_right_output_volume() + 1);
 
-            [left_output, right_output]
+            [left_output / 32.0, right_output / 32.0]
         } else {
-            [0.0; 2]
+            [-1.0; 2]
         }
     }
 
