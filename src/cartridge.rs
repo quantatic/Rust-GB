@@ -11,6 +11,7 @@ pub struct Cartridge {
 enum CartridgeType {
     NoMbc(NoMbc),
     Mbc1(Mbc1),
+    Mbc2(Mbc2),
     Mbc3(Mbc3),
     Mbc5(Mbc5),
 }
@@ -20,6 +21,7 @@ impl Cartridge {
         match &self.cartridge_type {
             CartridgeType::NoMbc(no_mbc) => no_mbc.read(address),
             CartridgeType::Mbc1(mbc_1) => mbc_1.read(address),
+            CartridgeType::Mbc2(mbc_2) => mbc_2.read(address),
             CartridgeType::Mbc3(mbc_3) => mbc_3.read(address),
             CartridgeType::Mbc5(mbc_5) => mbc_5.read(address),
         }
@@ -29,6 +31,7 @@ impl Cartridge {
         match &mut self.cartridge_type {
             CartridgeType::NoMbc(no_mbc) => no_mbc.write(value, address),
             CartridgeType::Mbc1(mbc_1) => mbc_1.write(value, address),
+            CartridgeType::Mbc2(mbc_2) => mbc_2.write(value, address),
             CartridgeType::Mbc3(mbc_3) => mbc_3.write(value, address),
             CartridgeType::Mbc5(mbc_5) => mbc_5.write(value, address),
         }
@@ -38,6 +41,7 @@ impl Cartridge {
         match &mut self.cartridge_type {
             CartridgeType::NoMbc(_) => {}
             CartridgeType::Mbc1(_) => {}
+            CartridgeType::Mbc2(_) => {}
             CartridgeType::Mbc3(mbc_3) => mbc_3.step(),
             &mut CartridgeType::Mbc5(_) => {}
         }
@@ -197,6 +201,64 @@ impl Mbc1 {
                 }
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Mbc2 {
+    rom: Vec<[u8; 0x4000]>,
+    rom_banks: usize,
+    rom_bank: usize,
+    ram: Box<[u8; 0x200]>,
+    ram_enabled: bool,
+}
+
+impl Mbc2 {
+    fn new(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+        let rom: Vec<[u8; 0x4000]> = data
+            .chunks(0x4000)
+            .map(<[u8; 0x4000]>::try_from)
+            .collect::<Result<_, _>>()?;
+
+        let ram = Box::new([0; 0x200]);
+
+        Ok(Self {
+            rom_banks: rom.len(),
+            rom,
+            rom_bank: 1,
+            ram,
+            ram_enabled: false,
+        })
+    }
+
+    fn read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x3FFF => self.rom[0][usize::from(address)],
+            0x4000..=0x7FFF => {
+                self.rom[self.rom_bank % self.rom_banks][usize::from(address - 0x4000)]
+            }
+            0xA000..=0xBFFF => self.ram[usize::from(address & 0x1FF)],
+            _ => unreachable!(),
+        }
+    }
+
+    fn write(&mut self, value: u8, address: u16) {
+        match address {
+            0x0000..=0x3FFF => {
+                const ROM_BANK_SELECT_MASK: u16 = 1 << 8;
+
+                if (address & ROM_BANK_SELECT_MASK) != ROM_BANK_SELECT_MASK {
+                    self.ram_enabled = value == 0x0A;
+                } else {
+                    self.rom_bank = usize::from(value & 0b0000_1111);
+                    if self.rom_bank == 0 {
+                        self.rom_bank = 1;
+                    }
+                }
+            }
+            0xA000..=0xBFFF => self.ram[usize::from(address & 0x1FF)] = value,
+            _ => println!("write of 0x{:02X} to 0x{:04X}", value, address),
         }
     }
 }
@@ -540,6 +602,7 @@ impl Cartridge {
         let cartridge_impl = match cartridge_type_code {
             0x00 => CartridgeType::NoMbc(NoMbc::new(data, ram_size)?),
             0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data, ram_size)?),
+            0x05 | 0x06 => CartridgeType::Mbc2(Mbc2::new(data)?),
             0x0F | 0x10 | 0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data)?),
             0x19 | 0x1A | 0x1B | 0x1C | 0x1D | 0x1E => {
                 CartridgeType::Mbc5(Mbc5::new(data, ram_size)?)
