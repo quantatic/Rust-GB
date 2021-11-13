@@ -186,18 +186,6 @@ pub enum BranchConditionType {
     Unconditional,
 }
 
-impl BranchConditionType {
-    fn is_conditional(self) -> bool {
-        match self {
-            BranchConditionType::NotZero => true,
-            BranchConditionType::NotCarry => true,
-            BranchConditionType::Zero => true,
-            BranchConditionType::Carry => true,
-            BranchConditionType::Unconditional => true,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub enum RegisterByte {
     Accumulator,
@@ -303,6 +291,7 @@ impl Cpu {
         self.cycles_delay -= 1;
     }
 
+    #[cfg(test)]
     pub fn read_register(&self, register: RegisterByte) -> u8 {
         match register {
             RegisterByte::Accumulator => (self.af >> 8) as u8,

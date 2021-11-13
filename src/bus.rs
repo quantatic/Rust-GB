@@ -31,7 +31,7 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(cartridge: Cartridge) -> Self {
-        let mut result = Self {
+        Self {
             interrupt_enable: 0,
             interrupt_flag: 0,
             interrupt_master_enable: false,
@@ -44,9 +44,7 @@ impl Bus {
             joypad: Default::default(),
             apu: Default::default(),
             cartridge,
-        };
-
-        result
+        }
     }
 }
 

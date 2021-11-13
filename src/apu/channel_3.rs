@@ -188,4 +188,21 @@ impl Channel3 {
             self.enabled = false;
         }
     }
+
+    pub fn set_power(&mut self, value: bool) {
+        if value {
+            self.frame_sequencer_idx = 0;
+        } else {
+            self.sound_on_off = 0;
+            self.sound_length = 0;
+            self.length_counter = 0;
+            self.output_level = 0;
+            self.frequency_low = 0;
+            self.frequency_high = 0;
+
+            self.wave_table = [0; 16];
+
+            self.set_enabled(false);
+        }
+    }
 }

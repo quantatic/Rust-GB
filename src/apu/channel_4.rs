@@ -111,7 +111,6 @@ impl Channel4 {
     pub fn write_volume_envelope(&mut self, value: u8) {
         self.volume_envelope = value;
 
-        self.current_envelope_volume = self.get_initial_envelope_volume();
         self.envelope_ticks_left = self.get_envelope_length();
     }
 
@@ -212,6 +211,21 @@ impl Channel4 {
             self.enabled = true
         } else {
             self.enabled = false
+        }
+    }
+
+    pub fn set_power(&mut self, value: bool) {
+        if value {
+            self.frame_sequencer_idx = 0;
+        } else {
+            self.sound_length = 0;
+            self.volume_envelope = 0;
+            self.current_envelope_volume = 0;
+            self.polynomial_counter = 0;
+            self.linear_feedback_shift_register = 0;
+            self.counter_consecutive = 0;
+
+            self.set_enabled(false);
         }
     }
 }

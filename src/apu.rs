@@ -33,7 +33,7 @@ pub struct Apu {
     channel_4: Channel4,
     channel_control: u8,
     output_terminal_selection: u8,
-    all_sound_on: bool,
+    powered: bool,
 }
 
 impl Apu {
@@ -49,7 +49,7 @@ impl Apu {
             ((f32::from(value) / 15.0) * 2.0) - 1.0
         }
 
-        if self.all_sound_on {
+        if self.powered {
             let channel_1_sample = self.channel_1.sample();
             let channel_2_sample = self.channel_2.sample();
             let channel_3_sample = self.channel_3.sample();
@@ -104,7 +104,9 @@ impl Apu {
     }
 
     pub fn write_nr10(&mut self, value: u8) {
-        self.channel_1.write_sweep(value);
+        if self.powered {
+            self.channel_1.write_sweep(value);
+        }
     }
 
     pub fn read_nr11(&self) -> u8 {
@@ -112,7 +114,9 @@ impl Apu {
     }
 
     pub fn write_nr11(&mut self, value: u8) {
-        self.channel_1.write_sound_length_wave_duty(value)
+        if self.powered {
+            self.channel_1.write_sound_length_wave_duty(value);
+        }
     }
 
     pub fn read_nr12(&self) -> u8 {
@@ -120,7 +124,9 @@ impl Apu {
     }
 
     pub fn write_nr12(&mut self, value: u8) {
-        self.channel_1.write_volume_envelope(value)
+        if self.powered {
+            self.channel_1.write_volume_envelope(value);
+        }
     }
 
     pub fn read_nr13(&self) -> u8 {
@@ -128,7 +134,9 @@ impl Apu {
     }
 
     pub fn write_nr13(&mut self, value: u8) {
-        self.channel_1.write_frequency_low(value)
+        if self.powered {
+            self.channel_1.write_frequency_low(value);
+        }
     }
 
     pub fn read_nr14(&self) -> u8 {
@@ -136,7 +144,9 @@ impl Apu {
     }
 
     pub fn write_nr14(&mut self, value: u8) {
-        self.channel_1.write_frequency_high(value)
+        if self.powered {
+            self.channel_1.write_frequency_high(value);
+        }
     }
 
     pub fn read_nr21(&self) -> u8 {
@@ -144,7 +154,9 @@ impl Apu {
     }
 
     pub fn write_nr21(&mut self, value: u8) {
-        self.channel_2.write_sound_length_wave_duty(value)
+        if self.powered {
+            self.channel_2.write_sound_length_wave_duty(value);
+        }
     }
 
     pub fn read_nr22(&self) -> u8 {
@@ -152,7 +164,9 @@ impl Apu {
     }
 
     pub fn write_nr22(&mut self, value: u8) {
-        self.channel_2.write_volume_envelope(value)
+        if self.powered {
+            self.channel_2.write_volume_envelope(value);
+        }
     }
 
     pub fn read_nr23(&self) -> u8 {
@@ -160,7 +174,9 @@ impl Apu {
     }
 
     pub fn write_nr23(&mut self, value: u8) {
-        self.channel_2.write_frequency_low(value)
+        if self.powered {
+            self.channel_2.write_frequency_low(value);
+        }
     }
 
     pub fn read_nr24(&self) -> u8 {
@@ -168,7 +184,9 @@ impl Apu {
     }
 
     pub fn write_nr24(&mut self, value: u8) {
-        self.channel_2.write_frequency_high(value)
+        if self.powered {
+            self.channel_2.write_frequency_high(value);
+        }
     }
 
     pub fn read_nr30(&self) -> u8 {
@@ -176,7 +194,9 @@ impl Apu {
     }
 
     pub fn write_nr30(&mut self, value: u8) {
-        self.channel_3.write_sound_on_off(value);
+        if self.powered {
+            self.channel_3.write_sound_on_off(value);
+        }
     }
 
     pub fn read_nr31(&self) -> u8 {
@@ -184,7 +204,9 @@ impl Apu {
     }
 
     pub fn write_nr31(&mut self, value: u8) {
-        self.channel_3.write_sound_length(value)
+        if self.powered {
+            self.channel_3.write_sound_length(value);
+        }
     }
 
     pub fn read_nr32(&self) -> u8 {
@@ -192,7 +214,9 @@ impl Apu {
     }
 
     pub fn write_nr32(&mut self, value: u8) {
-        self.channel_3.write_output_level(value)
+        if self.powered {
+            self.channel_3.write_output_level(value);
+        }
     }
 
     pub fn read_nr33(&self) -> u8 {
@@ -200,7 +224,9 @@ impl Apu {
     }
 
     pub fn write_nr33(&mut self, value: u8) {
-        self.channel_3.write_frequency_low(value)
+        if self.powered {
+            self.channel_3.write_frequency_low(value);
+        }
     }
 
     pub fn read_nr34(&self) -> u8 {
@@ -208,7 +234,9 @@ impl Apu {
     }
 
     pub fn write_nr34(&mut self, value: u8) {
-        self.channel_3.write_frequency_high(value)
+        if self.powered {
+            self.channel_3.write_frequency_high(value);
+        }
     }
 
     pub fn read_wave_pattern_ram(&self, offset: u16) -> u8 {
@@ -216,7 +244,7 @@ impl Apu {
     }
 
     pub fn write_wave_pattern_ram(&mut self, value: u8, offset: u16) {
-        self.channel_3.write_wave_pattern_ram(value, offset)
+        self.channel_3.write_wave_pattern_ram(value, offset);
     }
 
     pub fn read_nr41(&self) -> u8 {
@@ -224,7 +252,9 @@ impl Apu {
     }
 
     pub fn write_nr41(&mut self, value: u8) {
-        self.channel_4.write_sound_length_register(value)
+        if self.powered {
+            self.channel_4.write_sound_length_register(value);
+        }
     }
 
     pub fn read_nr42(&self) -> u8 {
@@ -232,7 +262,9 @@ impl Apu {
     }
 
     pub fn write_nr42(&mut self, value: u8) {
-        self.channel_4.write_volume_envelope(value)
+        if self.powered {
+            self.channel_4.write_volume_envelope(value);
+        }
     }
 
     pub fn read_nr43(&self) -> u8 {
@@ -240,7 +272,9 @@ impl Apu {
     }
 
     pub fn write_nr43(&mut self, value: u8) {
-        self.channel_4.write_polynomial_counter(value)
+        if self.powered {
+            self.channel_4.write_polynomial_counter(value);
+        }
     }
 
     pub fn read_nr44(&self) -> u8 {
@@ -248,7 +282,9 @@ impl Apu {
     }
 
     pub fn write_nr44(&mut self, value: u8) {
-        self.channel_4.write_counter_consecutive(value)
+        if self.powered {
+            self.channel_4.write_counter_consecutive(value);
+        }
     }
 
     pub fn read_nr50(&self) -> u8 {
@@ -256,7 +292,9 @@ impl Apu {
     }
 
     pub fn write_nr50(&mut self, value: u8) {
-        self.channel_control = value
+        if self.powered {
+            self.channel_control = value
+        }
     }
 
     pub fn read_nr51(&self) -> u8 {
@@ -264,7 +302,9 @@ impl Apu {
     }
 
     pub fn write_nr51(&mut self, value: u8) {
-        self.output_terminal_selection = value
+        if self.powered {
+            self.output_terminal_selection = value;
+        }
     }
 
     const ALL_SOUND_ON_OFF_FLAG: u8 = 1 << 7;
@@ -275,7 +315,7 @@ impl Apu {
 
     pub fn read_nr52(&self) -> u8 {
         let mut result = 0;
-        if self.all_sound_on {
+        if self.powered {
             result |= Self::ALL_SOUND_ON_OFF_FLAG;
         }
 
@@ -299,12 +339,13 @@ impl Apu {
     }
 
     pub fn write_nr52(&mut self, value: u8) {
-        let sound_setting = (value & Self::ALL_SOUND_ON_OFF_FLAG) == Self::ALL_SOUND_ON_OFF_FLAG;
-        self.all_sound_on = sound_setting;
-        self.channel_1.set_enabled(sound_setting);
-        self.channel_2.set_enabled(sound_setting);
-        self.channel_3.set_enabled(sound_setting);
-        self.channel_4.set_enabled(sound_setting);
+        let powered = (value & Self::ALL_SOUND_ON_OFF_FLAG) == Self::ALL_SOUND_ON_OFF_FLAG;
+        self.powered = powered;
+
+        self.channel_1.set_power(powered);
+        self.channel_2.set_power(powered);
+        self.channel_3.set_power(powered);
+        self.channel_4.set_power(powered);
     }
 }
 

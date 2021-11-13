@@ -23,7 +23,6 @@ pub struct Channel2 {
     volume_envelope: u8,
     frequency_low: u8,
     frequency_high: u8,
-    frequency_shadow: u16,
     wave_duty_timer_ticks_left: u16,
     wave_duty_index: usize,
     frame_sequencer_idx: usize,
@@ -111,7 +110,6 @@ impl Channel2 {
         self.volume_envelope = value;
 
         self.current_envelope_volume = self.get_initial_envelope_volume();
-        self.envelope_ticks_left = self.get_envelope_length();
     }
 
     pub fn read_frequency_low(&self) -> u8 {
@@ -217,6 +215,21 @@ impl Channel2 {
             self.enabled = true;
         } else {
             self.enabled = false;
+        }
+    }
+
+    pub fn set_power(&mut self, value: bool) {
+        if value {
+            self.frame_sequencer_idx = 0;
+            self.wave_duty_index = 0;
+        } else {
+            self.length_counter = 0;
+            self.sound_length_wave_duty = 0;
+            self.volume_envelope = 0;
+            self.frequency_low = 0;
+            self.frequency_high = 0;
+
+            self.set_enabled(false);
         }
     }
 }

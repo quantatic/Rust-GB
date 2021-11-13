@@ -22,6 +22,7 @@ use winit::window::WindowBuilder;
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 const PPU_WIDTH: u16 = 160;
@@ -43,7 +44,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
     let cartridge = Cartridge::new(&rom)?;
     let mut cpu = Cpu::new(cartridge);
-    let mut save_state = cpu.clone();
 
     let event_loop = EventLoop::new();
     let window = {
@@ -166,8 +166,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::AddressingModeByte;
-
     use super::*;
 
     fn test_blaarg_rom_passed(rom: &[u8]) {
