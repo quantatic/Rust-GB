@@ -419,12 +419,10 @@ impl Mbc3 {
     fn write_latch(&mut self, value: u8) {
         if value == 0 {
             self.latch_state = RtcLatchState::PartialLatch;
+        } else if value == 1 && matches!(self.latch_state, RtcLatchState::PartialLatch) {
+            self.latch_state = RtcLatchState::Latched;
         } else {
-            if value == 1 && matches!(self.latch_state, RtcLatchState::PartialLatch) {
-                self.latch_state = RtcLatchState::Latched;
-            } else {
-                self.latch_state = RtcLatchState::Unlatched;
-            }
+            self.latch_state = RtcLatchState::Unlatched;
         }
     }
 

@@ -1,8 +1,13 @@
 use crate::{
-    apu::Apu, cartridge::Cartridge, joypad::Joypad, ppu::Ppu, serial::Serial, timer::Timer,
+    apu::Apu,
+    cartridge::Cartridge,
+    joypad::Joypad,
+    ppu::{Ppu, PpuMode, PpuRenderStatus},
+    serial::Serial,
+    timer::Timer,
 };
 
-const BOOT_ROM: &[u8; 256] = include_bytes!("boot_rom.bin");
+const BOOT_ROM: &[u8; 0x900] = include_bytes!("cgb_boot_rom.bin");
 
 #[derive(Clone, Copy, Debug)]
 pub enum InterruptType {
@@ -13,14 +18,27 @@ pub enum InterruptType {
     Joypad,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum SpeedMode {
+    Normal,
+    Double,
+}
+
 #[derive(Clone)]
 pub struct Bus {
     interrupt_enable: u8,
     interrupt_flag: u8,
     interrupt_master_enable: bool,
-    low_ram: [u8; 0x2000],
+    wram_banks: Box<[[u8; 0x1000]; 8]>,
+    wram_bank_index: u8,
     high_ram: [u8; 0x7F],
     boot_rom_enabled: bool,
+    dma_source: u16,
+    dma_destination: u16,
+    prepare_speed_switch: bool,
+    current_speed: SpeedMode,
+    hblank_dma_blocks_left: u8,
+    hblank_dma_ongoing: bool,
     pub cartridge: Cartridge,
     pub timer: Timer,
     pub serial: Serial,
@@ -35,9 +53,16 @@ impl Bus {
             interrupt_enable: 0,
             interrupt_flag: 0,
             interrupt_master_enable: false,
-            low_ram: [0; 0x2000],
+            wram_banks: Box::new([[0; 0x1000]; 8]),
+            wram_bank_index: 1,
             high_ram: [0; 0x7F],
             boot_rom_enabled: true,
+            dma_source: 0,
+            dma_destination: 0,
+            prepare_speed_switch: false,
+            current_speed: SpeedMode::Normal,
+            hblank_dma_blocks_left: 0,
+            hblank_dma_ongoing: false,
             timer: Default::default(),
             serial: Default::default(),
             ppu: Default::default(),
@@ -66,10 +91,38 @@ impl Bus {
             self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
         }
 
+        let old_ppu_mode = self.ppu.get_stat_mode();
+
         self.apu.step();
         self.cartridge.step();
         self.ppu.step();
         self.timer.step();
+
+        let new_ppu_mode = self.ppu.get_stat_mode();
+
+        if !matches!(old_ppu_mode, PpuRenderStatus::HBlank)
+            && matches!(new_ppu_mode, PpuRenderStatus::HBlank)
+            && self.hblank_dma_blocks_left > 0
+            && self.hblank_dma_ongoing
+        {
+            for _ in 0..Self::DMA_BLOCK_SIZE {
+                let data = self.read_byte_address(self.dma_source);
+                self.dma_source += 1;
+
+                self.write_byte_address(data, self.dma_destination);
+                self.dma_destination += 1;
+            }
+            self.hblank_dma_blocks_left -= 1;
+
+            if self.hblank_dma_blocks_left == 0 {
+                self.hblank_dma_ongoing = false;
+            }
+        }
+
+        if matches!(self.current_speed, SpeedMode::Double) {
+            self.cartridge.step();
+            self.timer.step();
+        }
     }
 
     pub fn read_byte_address(&self, address: u16) -> u8 {
@@ -81,12 +134,21 @@ impl Bus {
                     self.cartridge.read(address)
                 }
             }
-            0x0100..=0x7FFF => self.cartridge.read(address),
-            0x8000..=0x97FF => self.ppu.read_character_ram(address - 0x8000),
-            0x9800..=0x9BFF => self.ppu.read_bg_map_data_1(address - 0x9800),
-            0x9C00..=0x9FFF => self.ppu.read_bg_map_data_2(address - 0x9C00),
+            0x0100..=0x01FF => self.cartridge.read(address),
+            0x0200..=0x08FF => {
+                if self.boot_rom_enabled {
+                    BOOT_ROM[usize::from(address)]
+                } else {
+                    self.cartridge.read(address)
+                }
+            }
+            0x900..=0x7FFF => self.cartridge.read(address),
+            0x8000..=0x9FFF => self.ppu.read_vram(address - 0x8000),
             0xA000..=0xBFFF => self.cartridge.read(address),
-            0xC000..=0xDFFF => self.low_ram[usize::from(address - 0xC000)],
+            0xC000..=0xCFFF => self.wram_banks[0][usize::from(address - 0xC000)],
+            0xD000..=0xDFFF => {
+                self.wram_banks[usize::from(self.wram_bank_index)][usize::from(address - 0xD000)]
+            }
             0xE000..=0xFDFF => self.read_byte_address(address - 0x2000), // echo ram
             0xFE00..=0xFE9F => self.ppu.read_object_attribute_memory(address - 0xFE00),
             0xFEA0..=0xFEFF => 0x00, // unusable memory, read returns garbage
@@ -117,6 +179,7 @@ impl Bus {
             0xFF24 => self.apu.read_nr50(),
             0xFF25 => self.apu.read_nr51(),
             0xFF26 => self.apu.read_nr52(),
+            0xFF30..=0xFF3F => self.apu.read_wave_pattern_ram(address - 0xFF30),
             0xFF40 => self.ppu.read_lcd_control(),
             0xFF41 => self.ppu.read_stat(),
             0xFF42 => self.ppu.read_scroll_y(),
@@ -128,10 +191,18 @@ impl Bus {
             0xFF49 => self.ppu.read_obj_palette_1(),
             0xFF4A => self.ppu.read_window_y(),
             0xFF4B => self.ppu.read_window_x(),
-            0xFF4D => {
-                eprintln!("reading from unimplemented KEY1");
-                0
-            }
+            0xFF4D => self.read_key_1(),
+            0xFF4F => self.ppu.read_vram_bank(),
+            0xFF51 => self.read_dma_source_high(),
+            0xFF52 => self.read_dma_source_low(),
+            0xFF53 => self.read_dma_destination_high(),
+            0xFF54 => self.read_dma_destination_low(),
+            0xFF55 => self.read_dma_start(),
+            0xFF68 => self.ppu.read_background_palette_index(),
+            0xFF69 => self.ppu.read_background_palette_data(),
+            0xFF6A => self.ppu.read_obj_palette_index(),
+            0xFF6B => self.ppu.read_obj_palette_data(),
+            0xFF70 => self.wram_bank_index,
             0xFF80..=0xFFFE => self.high_ram[usize::from(address - 0xFF80)],
             0xFFFF => self.interrupt_enable,
             _ => {
@@ -152,15 +223,13 @@ impl Bus {
             0x0000..=0x7FFF => {
                 self.cartridge.write(value, address);
             }
-            0x8000..=0x97FF => {
-                self.ppu.write_character_ram(value, address - 0x8000);
-            }
-            0x9800..=0x9BFF => {
-                self.ppu.write_bg_map_data_1(value, address - 0x9800);
-            }
-            0x9C00..=0x9FFF => self.ppu.write_bg_map_data_2(value, address - 0x9C00),
+            0x8000..=0x9FFF => self.ppu.write_vram(value, address - 0x8000),
             0xA000..=0xBFFF => self.cartridge.write(value, address),
-            0xC000..=0xDFFF => self.low_ram[usize::from(address - 0xC000)] = value,
+            0xC000..=0xCFFF => self.wram_banks[0][usize::from(address - 0xC000)] = value,
+            0xD000..=0xDFFF => {
+                self.wram_banks[usize::from(self.wram_bank_index)][usize::from(address - 0xD000)] =
+                    value
+            }
             0xE000..=0xFDFF => self.write_byte_address(value, address - 0x2000), // echo ram
             0xFE00..=0xFE9F => self
                 .ppu
@@ -168,7 +237,6 @@ impl Bus {
             0xFEA0..=0xFEFF => {} // unusable memory, write is no-op
             0xFF00 => self.joypad.write(value),
             0xFF01 => self.serial.write_byte(value),
-            // 0xFF02 => eprintln!("writing 0x{:02X} to unimplemented SC", value),
             0xFF02 => {}
             0xFF04 => self.timer.set_divider_register(value),
             0xFF05 => self.timer.set_timer_counter(value),
@@ -217,9 +285,39 @@ impl Bus {
             0xFF49 => self.ppu.write_obj_palette_1(value),
             0xFF4A => self.ppu.write_window_y(value),
             0xFF4B => self.ppu.write_window_x(value),
-            0xFF4D => eprintln!("writing 0x{:02X} to unimplemented KEY1", value),
+            0xFF4C => {
+                const CGB_MODE_FLAG_MASK: u8 = 1 << 7;
+                const DMG_MODE_FLAG_MASK: u8 = 1 << 2;
+                const PGB_MODE_FLAG_MASK: u8 = CGB_MODE_FLAG_MASK | DMG_MODE_FLAG_MASK;
+
+                let ppu_mode = match value & PGB_MODE_FLAG_MASK {
+                    PGB_MODE_FLAG_MASK => PpuMode::Pgb,
+                    CGB_MODE_FLAG_MASK => PpuMode::Cgb,
+                    DMG_MODE_FLAG_MASK => PpuMode::Dmg,
+                    _ => unreachable!("0b{:08b}", value),
+                };
+
+                self.ppu.set_ppu_mode(ppu_mode);
+            }
+            0xFF4D => self.write_key_1(value),
+            0xFF4F => self.ppu.write_vram_bank(value),
             0xFF50 => {
                 self.boot_rom_enabled = value == 0 // disable boot rom on non-zero write
+            }
+            0xFF51 => self.write_dma_source_high(value),
+            0xFF52 => self.write_dma_source_low(value),
+            0xFF53 => self.write_dma_destination_high(value),
+            0xFF54 => self.write_dma_destination_low(value),
+            0xFF55 => self.write_dma_start(value),
+            0xFF68 => self.ppu.write_background_palette_index(value),
+            0xFF69 => self.ppu.write_background_palette_data(value),
+            0xFF6A => self.ppu.write_obj_palette_index(value),
+            0xFF6B => self.ppu.write_obj_palette_data(value),
+            0xFF70 => {
+                self.wram_bank_index = value & 0b111;
+                if self.wram_bank_index == 0 {
+                    self.wram_bank_index = 1;
+                }
             }
             0xFF80..=0xFFFE => {
                 self.high_ram[usize::from(address - 0xFF80)] = value;
@@ -233,6 +331,100 @@ impl Bus {
         let bytes = value.to_le_bytes();
         self.write_byte_address(bytes[0], address);
         self.write_byte_address(bytes[1], address + 1);
+    }
+
+    fn read_dma_source_high(&self) -> u8 {
+        (self.dma_source >> 8) as u8
+    }
+
+    fn write_dma_source_high(&mut self, value: u8) {
+        self.dma_source &= !0xFF00;
+        self.dma_source |= u16::from(value) << 8;
+    }
+
+    fn read_dma_source_low(&self) -> u8 {
+        self.dma_source as u8
+    }
+
+    fn write_dma_source_low(&mut self, value: u8) {
+        self.dma_source &= !0x00FF;
+        self.dma_source |= u16::from(value & 0xF0);
+    }
+
+    fn read_dma_destination_high(&self) -> u8 {
+        (self.dma_destination >> 8) as u8
+    }
+
+    fn write_dma_destination_high(&mut self, value: u8) {
+        self.dma_destination &= !0xFF00;
+        self.dma_destination |= u16::from((value & 0b0001_1111) | 0b1000_0000) << 8;
+    }
+
+    fn read_dma_destination_low(&self) -> u8 {
+        self.dma_destination as u8
+    }
+
+    fn write_dma_destination_low(&mut self, value: u8) {
+        self.dma_destination &= !0x00FF;
+        self.dma_destination |= u16::from(value & 0xF0);
+    }
+
+    fn read_dma_start(&self) -> u8 {
+        if self.hblank_dma_ongoing {
+            self.hblank_dma_blocks_left.wrapping_sub(1)
+        } else {
+            self.hblank_dma_blocks_left.wrapping_sub(1) | 0b1000_0000
+        }
+    }
+
+    const DMA_BLOCK_SIZE: u16 = 0x10;
+    fn write_dma_start(&mut self, value: u8) {
+        const HBLANK_DMA_MASK: u8 = 0b1000_0000;
+        const DMA_LENGTH_MASK: u8 = 0b0111_1111;
+
+        let transfer_blocks = (value & DMA_LENGTH_MASK) + 1;
+
+        if (value & HBLANK_DMA_MASK) == HBLANK_DMA_MASK {
+            self.hblank_dma_blocks_left = transfer_blocks;
+            self.hblank_dma_ongoing = true;
+        } else if self.hblank_dma_blocks_left > 0 {
+            self.hblank_dma_ongoing = false;
+        } else {
+            for _ in 0..transfer_blocks {
+                for _ in 0..Self::DMA_BLOCK_SIZE {
+                    let data = self.read_byte_address(self.dma_source);
+                    self.dma_source += 1;
+
+                    self.write_byte_address(data, self.dma_destination);
+                    self.dma_destination += 1;
+                }
+            }
+
+            self.hblank_dma_blocks_left = 0;
+            self.hblank_dma_ongoing = false;
+        }
+    }
+
+    const KEY_1_PREPARE_SPEED_SWITCH_MASK: u8 = 1 << 0;
+    const KEY_1_CURRENT_SPEED_MASK: u8 = 1 << 7;
+
+    fn read_key_1(&self) -> u8 {
+        let mut result = 0;
+
+        if self.prepare_speed_switch {
+            result |= Self::KEY_1_PREPARE_SPEED_SWITCH_MASK;
+        }
+
+        if matches!(self.current_speed, SpeedMode::Double) {
+            result |= Self::KEY_1_CURRENT_SPEED_MASK;
+        }
+
+        result
+    }
+
+    fn write_key_1(&mut self, value: u8) {
+        self.prepare_speed_switch = (value & Self::KEY_1_PREPARE_SPEED_SWITCH_MASK)
+            == Self::KEY_1_PREPARE_SPEED_SWITCH_MASK;
     }
 }
 
@@ -294,5 +486,29 @@ impl Bus {
     // TODO: There is a HALT bug when the instruction before the halt is an EI.
     pub fn halt_finished(&mut self) -> bool {
         (self.interrupt_enable & self.interrupt_flag) != 0
+    }
+
+    // Attempts to handle an executed stop instruction. If there is a pending speed
+    // switch, that will consume the stop instruction and a speed switch will occur.
+    // Otherwise, the stop instruction should be handled as usual.
+    //
+    // Returns whether the stop instruction was handled by the bus, otherwise the cpu
+    // shoud handle it as usual.
+    pub fn maybe_handle_stop(&mut self) -> bool {
+        if self.prepare_speed_switch {
+            self.current_speed = match self.current_speed {
+                SpeedMode::Normal => SpeedMode::Double,
+                SpeedMode::Double => SpeedMode::Normal,
+            };
+            self.prepare_speed_switch = false;
+
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_current_speed(&self) -> SpeedMode {
+        self.current_speed
     }
 }

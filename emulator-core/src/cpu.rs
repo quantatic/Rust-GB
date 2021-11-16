@@ -1,8 +1,9 @@
 use std::fmt::Debug;
 
 use crate::{
-    bus::{Bus, InterruptType},
+    bus::{Bus, InterruptType, SpeedMode},
     cartridge::Cartridge,
+    joypad::Button,
 };
 
 #[derive(Clone)]
@@ -16,6 +17,7 @@ pub struct Cpu {
     pub bus: Bus,
     cycles_delay: u8,
     halted: bool,
+    stopped: bool,
 }
 
 impl Debug for Cpu {
@@ -166,6 +168,7 @@ pub enum InstructionType {
     Srl {
         target: AddressingModeByte,
     },
+    Stop,
     Sub {
         source: AddressingModeByte,
     },
@@ -261,34 +264,63 @@ impl Cpu {
             bus: Bus::new(cartridge),
             cycles_delay: 0,
             halted: false,
+            stopped: false,
         }
     }
 }
 
 impl Cpu {
     pub fn step(&mut self) {
+        if self.stopped {
+            return;
+        }
+
+        let cycles_to_execute = match self.bus.get_current_speed() {
+            SpeedMode::Normal => 1,
+            SpeedMode::Double => 2,
+        };
+
         self.bus.step();
 
-        // If currently halted, check to see if ongoing halt is finished. If not, bail.
-        if self.halted {
-            if self.bus.halt_finished() {
-                self.halted = false;
-            } else {
-                return;
+        for _ in 0..cycles_to_execute {
+            if self.cycles_delay == 0 {
+                // If currently halted, check to see if ongoing halt is finished. If not, bail.
+                if self.halted {
+                    if self.bus.halt_finished() {
+                        self.halted = false;
+                    } else {
+                        return;
+                    }
+                }
+
+                if let Some(interrupt_type) = self.bus.poll_interrupt() {
+                    self.handle_interrupt(interrupt_type);
+                    self.cycles_delay = 20;
+                } else {
+                    let decoded = self.decode();
+                    self.cycles_delay = self.execute(decoded);
+                }
             }
+
+            self.cycles_delay -= 1;
+        }
+    }
+
+    pub fn set_button_pressed(&mut self, button: Button, pressed: bool) {
+        if pressed {
+            self.stopped = false;
         }
 
-        if self.cycles_delay == 0 {
-            if let Some(interrupt_type) = self.bus.poll_interrupt() {
-                self.handle_interrupt(interrupt_type);
-                self.cycles_delay = 20;
-            } else {
-                let decoded = self.decode();
-                self.cycles_delay = self.execute(decoded);
-            }
+        match button {
+            Button::A => self.bus.joypad.set_a_pressed(pressed),
+            Button::B => self.bus.joypad.set_b_pressed(pressed),
+            Button::Start => self.bus.joypad.set_start_pressed(pressed),
+            Button::Select => self.bus.joypad.set_select_pressed(pressed),
+            Button::Up => self.bus.joypad.set_up_pressed(pressed),
+            Button::Down => self.bus.joypad.set_down_pressed(pressed),
+            Button::Left => self.bus.joypad.set_left_pressed(pressed),
+            Button::Right => self.bus.joypad.set_right_pressed(pressed),
         }
-
-        self.cycles_delay -= 1;
     }
 
     #[cfg(test)]
@@ -611,6 +643,13 @@ impl Cpu {
                 self.pc += 1;
                 Instruction {
                     instruction_type: InstructionType::Rrca,
+                    cycles: 4,
+                }
+            }
+            0x10 => {
+                self.pc += 1;
+                Instruction {
+                    instruction_type: InstructionType::Stop,
                     cycles: 4,
                 }
             }
@@ -1226,6 +1265,7 @@ impl Cpu {
             InstructionType::Sla { target } => self.execute_sla(target),
             InstructionType::Sra { target } => self.execute_sra(target),
             InstructionType::Srl { target } => self.execute_srl(target),
+            InstructionType::Stop => self.execute_stop(),
             InstructionType::Sub { source } => self.execute_sub(source),
             InstructionType::Swap { target } => self.execute_swap(target),
             InstructionType::Xor { source } => self.execute_xor(source),
@@ -1855,6 +1895,14 @@ impl Cpu {
         self.set_subtract_flag(false);
         self.set_half_carry_flag(false);
         self.set_carry_flag((old_value & 0b0000_0001) != 0);
+
+        0
+    }
+
+    fn execute_stop(&mut self) -> u8 {
+        // If the bus does not handle this stop (by performing a speed switch),
+        // we need to stop until the next user input is received.
+        self.stopped = !self.bus.maybe_handle_stop();
 
         0
     }

@@ -1,3 +1,14 @@
+pub enum Button {
+    Up,
+    Down,
+    Left,
+    Right,
+    Start,
+    Select,
+    B,
+    A,
+}
+
 #[derive(Clone, Default)]
 pub struct Joypad {
     action_buttons_selected: bool,

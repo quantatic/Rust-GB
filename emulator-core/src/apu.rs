@@ -8,8 +8,6 @@ use channel_2::Channel2;
 use channel_3::Channel3;
 use channel_4::Channel4;
 
-use std::convert::TryFrom;
-
 #[derive(Clone, Debug)]
 enum WaveDuty {
     Eighth,

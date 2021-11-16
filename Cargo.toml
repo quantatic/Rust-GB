@@ -1,15 +1,9 @@
-[package]
-name = "gb-emulation"
-version = "0.1.0"
-authors = ["quantatic"]
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-pixels = "0.7.0"
-rodio = "0.14.0"
-winit = "0.25.0"
+[workspace]
+members = [
+	"emulator-core",
+	"emulator-native",
+]
+resolver = "2"
 
 [profile.release]
 opt-level = 3
