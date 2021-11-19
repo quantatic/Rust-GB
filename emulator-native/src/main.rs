@@ -2,44 +2,76 @@ mod samples_queue;
 
 use crate::samples_queue::samples_queue;
 
+use emulator_core::calculate_ppu_buffer_checksum;
 use emulator_core::cartridge::Cartridge;
 use emulator_core::cpu::Cpu;
 use emulator_core::joypad::Button;
 
 use pixels::{wgpu::TextureFormat, PixelsBuilder, SurfaceTexture};
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
 use std::error::Error;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 const PPU_WIDTH: u16 = 160;
 const PPU_HEIGHT: u16 = 144;
-const PPU_SCALE: u16 = 4;
+const DEFAULT_PIXEL_SCALE: u16 = 4;
 
 const CLOCK_FREQUENCY: u32 = 4_194_304;
 const AUDIO_SAMPLE_FREQUENCY: u32 = 44_100;
 
+fn get_save_filename<T: AsRef<str>>(rom_filename: T) -> String {
+    format!("{}.save", rom_filename.as_ref())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() != 2 {
-        return Err(format!("usage: ./{} <rom_file>", args[0]).into());
+    if args.len() != 2 && args.len() != 3 {
+        return Err(format!("usage: ./{} <rom_file> [scale_factor]", args[0]).into());
     }
-    let mut rom = Vec::new();
-    File::open(&args[1])?.read_to_end(&mut rom)?;
+    let rom_filename = args[1].clone();
+    println!("playing from rom: {}", rom_filename);
+
+    let mut rom_data = Vec::new();
+    File::open(&rom_filename)?.read_to_end(&mut rom_data)?;
 
     println!("cpu size: {}", std::mem::size_of::<Cpu>());
-    let cartridge = Cartridge::new(&rom)?;
+    let cartridge = Cartridge::new(&rom_data)?;
     let mut cpu = Cpu::new(cartridge);
+
+    let save_filename = get_save_filename(rom_filename);
+    println!("attempting to load save from: {}", save_filename);
+
+    if let Ok(mut save_file) = File::open(&save_filename) {
+        let mut save_data = Vec::new();
+        save_file.read_to_end(&mut save_data)?;
+        if cpu.bus.cartridge.write_save_data(&save_data) {
+            println!("save data successfully loaded");
+        } else {
+            println!("save data was corrupted, ignoring save data");
+        }
+    } else {
+        println!("no save data found! starting from blank save")
+    }
+
+    let scale_factor = args
+        .get(2)
+        .map(|scale_str| scale_str.parse())
+        .transpose()?
+        .unwrap_or(DEFAULT_PIXEL_SCALE);
 
     let event_loop = EventLoop::new();
     let window = {
-        let size = LogicalSize::new(PPU_WIDTH * PPU_SCALE, PPU_HEIGHT * PPU_SCALE);
+        let size = LogicalSize::new(
+            PPU_WIDTH * scale_factor,
+            PPU_HEIGHT * scale_factor,
+        );
         WindowBuilder::new()
             .with_title("Aidan's Gameboy Emulator")
             .with_inner_size(size)
@@ -125,32 +157,61 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
+                window_id,
                 ..
-            } => *control_flow = ControlFlow::Exit,
-            Event::DeviceEvent {
+            } if window_id == window.id() => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent {
                 event:
-                    DeviceEvent::Key(KeyboardInput {
-                        state,
-                        virtual_keycode: Some(keycode),
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state,
+                                virtual_keycode: Some(keycode),
+                                ..
+                            },
                         ..
-                    }),
-                ..
-            } => {
+                    },
+                window_id,
+            } if window_id == window.id() => {
                 let pressed = match state {
                     ElementState::Pressed => true,
                     ElementState::Released => false,
                 };
                 match keycode {
-                    VirtualKeyCode::Z => cpu.set_button_pressed(Button::A, pressed),
-                    VirtualKeyCode::X => cpu.set_button_pressed(Button::B, pressed),
+                    VirtualKeyCode::Z => cpu.set_button_pressed(Button::B, pressed),
+                    VirtualKeyCode::X => cpu.set_button_pressed(Button::A, pressed),
                     VirtualKeyCode::RShift => cpu.set_button_pressed(Button::Select, pressed),
                     VirtualKeyCode::Return => cpu.set_button_pressed(Button::Start, pressed),
                     VirtualKeyCode::Up => cpu.set_button_pressed(Button::Up, pressed),
                     VirtualKeyCode::Right => cpu.set_button_pressed(Button::Right, pressed),
                     VirtualKeyCode::Down => cpu.set_button_pressed(Button::Down, pressed),
                     VirtualKeyCode::Left => cpu.set_button_pressed(Button::Left, pressed),
+                    VirtualKeyCode::H if pressed => {
+                        println!(
+                            "current checksum: 0x{:08X}",
+                            calculate_ppu_buffer_checksum(&cpu)
+                        )
+                    }
                     _ => {}
                 };
+            }
+            Event::LoopDestroyed => {
+                let mut save_file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&save_filename)
+                    .expect(format!("failed to open save file: {}", save_filename).as_str());
+                let save_data = cpu.bus.cartridge.read_save_data();
+
+                save_file.write_all(&save_data).expect(
+                    format!("failed to write save data to save file: {}", save_filename).as_str(),
+                );
+                save_file.flush().expect(
+                    format!("failed to flush save data to save file: {}", save_filename).as_str(),
+                );
+
+                println!("wrote save file to {}", save_filename);
             }
             _ => {}
         };

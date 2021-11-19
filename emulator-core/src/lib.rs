@@ -7,9 +7,24 @@ pub mod ppu;
 pub mod serial;
 pub mod timer;
 
+use cpu::Cpu;
+
+use std::hash::Hasher;
+
 pub const PPU_WIDTH: u16 = 160;
 pub const PPU_HEIGHT: u16 = 144;
 pub const CLOCK_FREQUENCY: u32 = 4_194_304;
+
+pub fn calculate_ppu_buffer_checksum(cpu: &Cpu) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    for pixel in cpu.bus.ppu.get_buffer().iter().flatten() {
+        hasher.write_u8(pixel.red);
+        hasher.write_u8(pixel.green);
+        hasher.write_u8(pixel.blue);
+    }
+
+    hasher.finalize()
+}
 
 #[cfg(test)]
 mod tests {
@@ -18,7 +33,20 @@ mod tests {
     use super::cartridge::Cartridge;
     use super::cpu::Cpu;
 
-    fn test_blaarg_rom_passed(rom: &[u8]) {
+    fn test_blaarg_rom_serial_passed(rom: &[u8]) {
+        let cartridge = Cartridge::new(rom).unwrap();
+        let mut cpu = Cpu::new(cartridge);
+
+        for _ in 0..150_000_000 {
+            cpu.step();
+        }
+
+        let serial_out = cpu.bus.serial.get_data_written();
+        println!("result: {}", serial_out);
+        assert!(serial_out.contains("Passed"));
+    }
+
+    fn test_rom_ppu_checksum_passed(rom: &[u8], checksum: u32) {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
@@ -26,9 +54,7 @@ mod tests {
             cpu.step();
         }
 
-        let serial_out = cpu.bus.serial.get_data_written();
-        println!("result: {}", serial_out);
-        assert!(serial_out.contains("Passed"));
+        assert_eq!(calculate_ppu_buffer_checksum(&cpu), checksum);
     }
 
     fn test_mooneye_rom_passed(rom: &[u8]) {
@@ -49,68 +75,109 @@ mod tests {
 
     #[test]
     fn test_01_special() {
-        test_blaarg_rom_passed(include_bytes!("../tests/01_special.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/01_special.gb"));
     }
 
     #[test]
     fn test_02_interrupts() {
-        test_blaarg_rom_passed(include_bytes!("../tests/02_interrupts.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/02_interrupts.gb"));
     }
 
     #[test]
     fn test_03_sp_hl() {
-        test_blaarg_rom_passed(include_bytes!("../tests/03_sp_hl.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/03_sp_hl.gb"));
     }
 
     #[test]
     fn test_04_op_r_imm() {
-        test_blaarg_rom_passed(include_bytes!("../tests/04_op_r_imm.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/04_op_r_imm.gb"));
     }
 
     #[test]
     fn test_05_op_rp() {
-        test_blaarg_rom_passed(include_bytes!("../tests/05_op_rp.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/05_op_rp.gb"));
     }
 
     #[test]
     fn test_06_ld_r_r() {
-        test_blaarg_rom_passed(include_bytes!("../tests/06_ld_r_r.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/06_ld_r_r.gb"));
     }
 
     #[test]
     fn test_07_jr_jp_call_ret_rst() {
-        test_blaarg_rom_passed(include_bytes!("../tests/07_jr_jp_call_ret_rst.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/07_jr_jp_call_ret_rst.gb"));
     }
 
     #[test]
     fn test_08_misc_instructions() {
-        test_blaarg_rom_passed(include_bytes!("../tests/08_misc_instructions.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/08_misc_instructions.gb"));
     }
 
     #[test]
     fn test_09_op_r_r() {
-        test_blaarg_rom_passed(include_bytes!("../tests/09_op_r_r.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/09_op_r_r.gb"));
     }
 
     #[test]
     fn test_10_bit_ops() {
-        test_blaarg_rom_passed(include_bytes!("../tests/10_bit_ops.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/10_bit_ops.gb"));
     }
 
     #[test]
     fn test_11_op_a_hl() {
-        test_blaarg_rom_passed(include_bytes!("../tests/11_op_a_hl.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/11_op_a_hl.gb"));
+    }
+
+    #[test]
+    fn test_cpu_instrs() {
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/cpu_instrs.gb"));
     }
 
     #[test]
     fn test_instr_timing() {
-        test_blaarg_rom_passed(include_bytes!("../tests/instr_timing.gb"));
+        test_blaarg_rom_serial_passed(include_bytes!("../tests/instr_timing.gb"));
     }
 
     #[test]
-    #[should_panic]
     fn test_interrupt_time() {
-        test_blaarg_rom_passed(include_bytes!("../tests/interrupt_time.gb"));
+        test_rom_ppu_checksum_passed(include_bytes!("../tests/interrupt_time.gb"), 0xB5786699);
+    }
+
+    #[test]
+    fn test_dmg_sound_01_registers() {
+        test_rom_ppu_checksum_passed(
+            include_bytes!("../tests/dmg_sound_01_registers.gb"),
+            0x56B263EC,
+        );
+    }
+
+    #[test]
+    fn test_dmg_sound_02_len_ctr() {
+        test_rom_ppu_checksum_passed(
+            include_bytes!("../tests/dmg_sound_02_len_ctr.gb"),
+            0x03D8876B,
+        );
+    }
+
+    #[test]
+    fn test_dmg_sound_03_trigger() {
+        test_rom_ppu_checksum_passed(
+            include_bytes!("../tests/dmg_sound_03_trigger.gb"),
+            0xD867C5CF,
+        );
+    }
+
+    #[test]
+    fn test_dmg_sound_04_sweep() {
+        test_rom_ppu_checksum_passed(include_bytes!("../tests/dmg_sound_04_sweep.gb"), 0xC7134CF1);
+    }
+
+    #[test]
+    fn test_dmg_sound_05_sweep_details() {
+        test_rom_ppu_checksum_passed(
+            include_bytes!("../tests/dmg_sound_05_sweep_details.gb"),
+            0x84F07FDD,
+        );
     }
 
     #[test]

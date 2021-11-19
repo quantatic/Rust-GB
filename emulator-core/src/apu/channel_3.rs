@@ -4,7 +4,9 @@ const SEQUENCER_CLOCK_FREQUENCY: u32 = 512;
 
 const SEQUENCER_CLOCK_PERIOD: u32 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
 
-const LENGTH_COUNTER_CLOCKS: [bool; 8] = [false, false, true, false, true, false, true, false];
+const LENGTH_COUNTER_CLOCKS: [bool; 8] = [true, false, true, false, true, false, true, false];
+
+const MAXIMUM_AUDIBLE_CHANNEL_FREQUENCY: u16 = 0x7FD;
 
 enum OutputLevel {
     Mute,
@@ -21,7 +23,7 @@ pub struct Channel3 {
     output_level: u8,
     frequency_low: u8,
     frequency_high: u8,
-    clock: u32,
+    clock: u64,
 
     wave_timer_ticks_left: u16,
     wave_index: usize,
@@ -33,7 +35,7 @@ pub struct Channel3 {
 
 impl Channel3 {
     pub fn step(&mut self) {
-        if self.clock % SEQUENCER_CLOCK_PERIOD == 0 {
+        if self.clock % u64::from(SEQUENCER_CLOCK_PERIOD) == 0 {
             if self.stop_when_length_expires() && LENGTH_COUNTER_CLOCKS[self.frame_sequencer_idx] {
                 self.length_counter = self.length_counter.saturating_sub(1);
                 if self.length_counter == 0 {
@@ -48,6 +50,12 @@ impl Channel3 {
         if self.wave_timer_ticks_left == 0 {
             self.wave_timer_ticks_left = (2048 - self.get_channel_frequency()) * 2;
             self.wave_index = (self.wave_index + 1) % 32;
+        }
+
+        // DAC controlled by upper bits of NR32: when 0 DAC (and thus channel) is disabled.
+        // - bit 7: sound playback
+        if !self.get_sound_playback() {
+            self.set_enabled(false);
         }
 
         self.clock += 1;
@@ -67,7 +75,7 @@ impl Channel3 {
             OutputLevel::Full => wave_table_entry,
         };
 
-        if self.get_sound_playback() && self.get_enabled() {
+        if self.get_enabled() && self.get_channel_frequency() <= MAXIMUM_AUDIBLE_CHANNEL_FREQUENCY {
             sample
         } else {
             0
@@ -116,9 +124,27 @@ impl Channel3 {
     pub fn write_frequency_high(&mut self, value: u8) {
         const FREQUENCY_HIGH_ENABLED_MASK: u8 = 1 << 7;
 
+        let length_counter_previously_enabled = self.stop_when_length_expires();
         self.frequency_high = value;
+        let length_counter_now_enabled = self.stop_when_length_expires();
 
-        if (value & FREQUENCY_HIGH_ENABLED_MASK) == FREQUENCY_HIGH_ENABLED_MASK {
+        let trigger = (value & FREQUENCY_HIGH_ENABLED_MASK) == FREQUENCY_HIGH_ENABLED_MASK;
+
+        // If length counter previously disabled, now enabled, next frame sequencer step doesn't tick
+        // the length counter, and length counter != 0, then we decrement length counter. If length
+        // counter becomes 0 via this decrement and we're not triggering, disable the channel.
+        if !length_counter_previously_enabled
+            && length_counter_now_enabled
+            && self.length_counter != 0
+            && !LENGTH_COUNTER_CLOCKS[self.frame_sequencer_idx]
+        {
+            self.length_counter -= 1;
+            if self.length_counter == 0 && !trigger {
+                self.set_enabled(false);
+            }
+        }
+
+        if trigger {
             self.set_enabled(true);
         }
     }
@@ -177,7 +203,16 @@ impl Channel3 {
     pub fn set_enabled(&mut self, value: bool) {
         if value {
             if self.length_counter == 0 {
-                self.length_counter = 256;
+                // If a channel is triggered when the frame sequencer's next step is one that doesn't
+                // clock the length counter, and the length counter is currently enabled, and the length
+                // counter is currently being reset to 256 from 0, reset to 255 instead (extra decrement).
+                if self.stop_when_length_expires()
+                    && !LENGTH_COUNTER_CLOCKS[self.frame_sequencer_idx]
+                {
+                    self.length_counter = 255;
+                } else {
+                    self.length_counter = 256;
+                }
             }
 
             self.wave_timer_ticks_left = (2048 - self.get_channel_frequency()) * 2;
@@ -191,16 +226,15 @@ impl Channel3 {
 
     pub fn set_power(&mut self, value: bool) {
         if value {
-            self.frame_sequencer_idx = 0;
+            self.frame_sequencer_idx = 7; // reset so next step will be 0x00
+
+            self.wave_table = [0; 16];
         } else {
             self.sound_on_off = 0;
             self.sound_length = 0;
-            self.length_counter = 0;
             self.output_level = 0;
             self.frequency_low = 0;
             self.frequency_high = 0;
-
-            self.wave_table = [0; 16];
 
             self.set_enabled(false);
         }

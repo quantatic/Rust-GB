@@ -9,5 +9,5 @@ resolver = "2"
 opt-level = 3
 debug = 2
 overflow-checks = true
-# lto = "fat"
+# lto = true
 # codegen-units = 1

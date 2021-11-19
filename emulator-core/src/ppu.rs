@@ -139,7 +139,7 @@ pub struct Ppu {
     bg_map_0: Box<[TileMapAttributeInfo; 0x400]>,
     bg_map_1: Box<[TileMapAttributeInfo; 0x400]>,
     vram_bank_index: u8,
-    object_attributes: [SpriteAttributeInfo; 40],
+    object_attributes: Box<[SpriteAttributeInfo; 40]>,
     vblank_interrupt_waiting: bool,
     stat_interrupt_waiting: bool,
     dot: u16,
@@ -154,16 +154,16 @@ pub struct Ppu {
     scroll_y: u8,
     window_x: u8,
     window_y: u8,
-    back_buffer: [[PaletteColorRgb555; 160]; 144], // access as buffer[y][x]
-    front_buffer: [[PaletteColorRgb555; 160]; 144], // access as buffer[y][x]
+    back_buffer: Box<[[PaletteColorRgb555; 160]; 144]>, // access as buffer[y][x]
+    front_buffer: Box<[[PaletteColorRgb555; 160]; 144]>, // access as buffer[y][x]
     bg_palette: u8,
     obj_palette_0: u8,
     obj_palette_1: u8,
     scanline_seen_sprites: HashSet<usize>,
     bg_color_palette_index: u8,
-    bg_color_palette_data: [[PaletteColorRgb555; 4]; 8],
+    bg_color_palette_data: Box<[[PaletteColorRgb555; 4]; 8]>,
     obj_color_palette_index: u8,
-    obj_color_palette_data: [[PaletteColorRgb555; 4]; 8],
+    obj_color_palette_data: Box<[[PaletteColorRgb555; 4]; 8]>,
     dmg_mode: bool,
 }
 
@@ -174,7 +174,7 @@ impl Default for Ppu {
             bg_map_0: Box::new([TileMapAttributeInfo::default(); 0x400]),
             bg_map_1: Box::new([TileMapAttributeInfo::default(); 0x400]),
             vram_bank_index: 0,
-            object_attributes: [Default::default(); 40],
+            object_attributes: Box::new([SpriteAttributeInfo::default(); 40]),
             vblank_interrupt_waiting: Default::default(),
             stat_interrupt_waiting: Default::default(),
             dot: Default::default(),
@@ -189,16 +189,16 @@ impl Default for Ppu {
             scroll_y: Default::default(),
             window_x: Default::default(),
             window_y: Default::default(),
-            back_buffer: [[PaletteColorRgb555::default(); 160]; 144],
-            front_buffer: [[PaletteColorRgb555::default(); 160]; 144],
+            back_buffer: Box::new([[PaletteColorRgb555::default(); 160]; 144]),
+            front_buffer: Box::new([[PaletteColorRgb555::default(); 160]; 144]),
             bg_palette: Default::default(),
             obj_palette_0: Default::default(),
             obj_palette_1: Default::default(),
             scanline_seen_sprites: HashSet::default(),
             bg_color_palette_index: Default::default(),
-            bg_color_palette_data: [[PaletteColorRgb555::default(); 4]; 8],
+            bg_color_palette_data: Box::new([[PaletteColorRgb555::default(); 4]; 8]),
             obj_color_palette_index: Default::default(),
-            obj_color_palette_data: [[PaletteColorRgb555::default(); 4]; 8],
+            obj_color_palette_data: Box::new([[PaletteColorRgb555::default(); 4]; 8]),
             dmg_mode: false,
         }
     }
@@ -326,7 +326,7 @@ impl Ppu {
             if self.lcd_y > 153 {
                 self.lcd_y = 0;
                 self.window_lcd_y = 0;
-                self.front_buffer = self.back_buffer;
+                self.front_buffer = self.back_buffer.clone();
             }
         }
     }
@@ -418,7 +418,7 @@ impl Ppu {
 
     fn get_sprite_pixel(&self, pixel_x: u8, pixel_y: u8) -> Option<SpritePixelInfo> {
         if self.get_obj_enable() {
-            for sprite_attribute_info in self.object_attributes {
+            for sprite_attribute_info in self.object_attributes.into_iter() {
                 match self.get_obj_size() {
                     ObjSize::EightByEight => {
                         if pixel_y + 16 >= sprite_attribute_info.y_position
@@ -682,13 +682,13 @@ impl Ppu {
 
     pub fn get_lcd_ppu_enable(&self) -> bool {
         const LCD_PPU_ENABLE_MASK: u8 = 1 << 7;
-        (self.lcd_control & LCD_PPU_ENABLE_MASK) != 0
+        (self.lcd_control & LCD_PPU_ENABLE_MASK) == LCD_PPU_ENABLE_MASK
     }
 
     fn get_window_tile_attributes(&self, index: u16) -> TileMapAttributeInfo {
         const WINDOW_TILE_MAP_AREA_MASK: u8 = 1 << 6;
 
-        if (self.lcd_control & WINDOW_TILE_MAP_AREA_MASK) == 0 {
+        if (self.lcd_control & WINDOW_TILE_MAP_AREA_MASK) != WINDOW_TILE_MAP_AREA_MASK {
             self.bg_map_0[usize::from(index)]
         } else {
             self.bg_map_1[usize::from(index)]
@@ -697,7 +697,7 @@ impl Ppu {
 
     fn get_window_enable(&self) -> bool {
         const WINDOW_ENABLE_MASK: u8 = 1 << 5;
-        (self.lcd_control & WINDOW_ENABLE_MASK) != 0
+        (self.lcd_control & WINDOW_ENABLE_MASK) == WINDOW_ENABLE_MASK
     }
 
     fn get_window_displayed(&self) -> bool {
@@ -710,7 +710,7 @@ impl Ppu {
         const BG_WINDOW_TILE_DATA_AREA_MASK: u8 = 1 << 4;
         // When LCDC.4 == 0 and tile_id < 128, we start indexing at an offset of
         // 0x1000. In all other situations, start indexing at 0x0000.
-        if (self.lcd_control & BG_WINDOW_TILE_DATA_AREA_MASK) == 0
+        if (self.lcd_control & BG_WINDOW_TILE_DATA_AREA_MASK) != BG_WINDOW_TILE_DATA_AREA_MASK
             && tile_map_attributes.tile_idx < 128
         {
             &self.tile_data[usize::from(tile_map_attributes.get_tile_vram_bank_number())][0x1000..]
@@ -739,6 +739,7 @@ impl Ppu {
         };
 
         if self.dmg_mode {
+            assert_eq!(attribute_info.get_tile_vram_bank(), 0);
             &self.tile_data[0][usize::from(real_tile_idx) * 16..][..16]
         } else {
             &self.tile_data[usize::from(attribute_info.get_tile_vram_bank())]
@@ -828,11 +829,17 @@ impl Ppu {
         palette_index: usize,
     ) -> PaletteColorRgb555 {
         if self.dmg_mode {
+            let used_obj_palette = if attribute_info.use_low_grayscale_palette() {
+                self.obj_palette_0
+            } else {
+                self.obj_palette_1
+            };
+
             let color_palette_idx = match palette_index {
-                0 => (self.obj_palette_0 >> 0) & 0b11,
-                1 => (self.obj_palette_0 >> 2) & 0b11,
-                2 => (self.obj_palette_0 >> 4) & 0b11,
-                3 => (self.obj_palette_0 >> 6) & 0b11,
+                0 => (used_obj_palette >> 0) & 0b11,
+                1 => (used_obj_palette >> 2) & 0b11,
+                2 => (used_obj_palette >> 4) & 0b11,
+                3 => (used_obj_palette >> 6) & 0b11,
                 _ => unreachable!(),
             };
 
@@ -1090,7 +1097,7 @@ impl Ppu {
     }
 
     pub fn write_vram_bank(&mut self, value: u8) {
-        self.vram_bank_index = value;
+        self.vram_bank_index = value & 0b1;
     }
 
     pub fn set_ppu_mode(&mut self, mode: PpuMode) {

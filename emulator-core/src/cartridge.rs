@@ -1,5 +1,5 @@
 use std::convert::TryFrom;
-use std::{convert::TryInto, error::Error, time::Instant};
+use std::{error::Error, time::Instant};
 
 #[derive(Clone)]
 pub struct Cartridge {
@@ -44,6 +44,26 @@ impl Cartridge {
             CartridgeType::Mbc2(_) => {}
             CartridgeType::Mbc3(mbc_3) => mbc_3.step(),
             &mut CartridgeType::Mbc5(_) => {}
+        }
+    }
+
+    pub fn read_save_data(&self) -> Vec<u8> {
+        match &self.cartridge_type {
+            CartridgeType::NoMbc(no_mbc) => no_mbc.read_save_data(),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.read_save_data(),
+            CartridgeType::Mbc2(mbc_2) => mbc_2.read_save_data(),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.read_save_data(),
+            CartridgeType::Mbc5(mbc_5) => mbc_5.read_save_data(),
+        }
+    }
+
+    pub fn write_save_data(&mut self, data: &[u8]) -> bool {
+        match &mut self.cartridge_type {
+            CartridgeType::NoMbc(no_mbc) => no_mbc.write_save_data(data),
+            CartridgeType::Mbc1(mbc_1) => mbc_1.write_save_data(data),
+            CartridgeType::Mbc2(mbc_2) => mbc_2.write_save_data(data),
+            CartridgeType::Mbc3(mbc_3) => mbc_3.write_save_data(data),
+            CartridgeType::Mbc5(mbc_5) => mbc_5.write_save_data(data),
         }
     }
 
@@ -93,6 +113,23 @@ impl NoMbc {
             _ => unreachable!(),
         };
     }
+
+    fn read_save_data(&self) -> Vec<u8> {
+        self.ram.iter().flatten().copied().collect()
+    }
+
+    fn write_save_data(&mut self, data: &[u8]) -> bool {
+        if data.len() != self.ram.iter().flatten().count() {
+            false
+        } else {
+            self.ram
+                .iter_mut()
+                .flatten()
+                .zip(data)
+                .for_each(|(ram_data, input_data)| *ram_data = *input_data);
+            true
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -108,20 +145,11 @@ struct Mbc1 {
 }
 
 impl Mbc1 {
-    const EXPECTED_RAM_SIZES: [usize; 3] = [0x0000, 0x2000, 0x8000];
-
     fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
-        if !Self::EXPECTED_RAM_SIZES.contains(&ram_size) {
-            let expected_string = format!(
-                "[{}]",
-                Self::EXPECTED_RAM_SIZES
-                    .map(|size| format!("0x{:04X}", size))
-                    .join(", ")
-            );
-
+        if ram_size % 0x2000 != 0 {
             return Err(format!(
-                "expected ram size to be one of {}, but got 0x{:04X}",
-                expected_string, ram_size
+                "expected ram size to be divisible by 0x2000, but got 0x{:04X}",
+                ram_size
             )
             .into());
         }
@@ -131,13 +159,14 @@ impl Mbc1 {
             .map(<[u8; 0x4000]>::try_from)
             .collect::<Result<_, _>>()?;
 
-        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_size / 0x2000];
+        let ram_banks = (ram_size / 0x2000).max(1);
+        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_banks];
 
         Ok(Self {
             rom_banks: rom.len(),
             rom,
             bank_1: 1,
-            ram_banks: ram.len(),
+            ram_banks,
             ram,
             bank_2: 0,
             ram_enabled: false,
@@ -203,6 +232,23 @@ impl Mbc1 {
             _ => unreachable!(),
         }
     }
+
+    fn read_save_data(&self) -> Vec<u8> {
+        self.ram.iter().flatten().copied().collect()
+    }
+
+    fn write_save_data(&mut self, data: &[u8]) -> bool {
+        if data.len() != self.ram.iter().flatten().count() {
+            false
+        } else {
+            self.ram
+                .iter_mut()
+                .flatten()
+                .zip(data)
+                .for_each(|(ram_data, input_data)| *ram_data = *input_data);
+            true
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -259,6 +305,19 @@ impl Mbc2 {
             }
             0xA000..=0xBFFF => self.ram[usize::from(address & 0x1FF)] = value,
             _ => println!("write of 0x{:02X} to 0x{:04X}", value, address),
+        }
+    }
+
+    fn read_save_data(&self) -> Vec<u8> {
+        self.ram.iter().copied().collect()
+    }
+
+    fn write_save_data(&mut self, data: &[u8]) -> bool {
+        if data.len() != self.ram.len() {
+            false
+        } else {
+            self.ram.copy_from_slice(data);
+            true
         }
     }
 }
@@ -461,6 +520,23 @@ impl Mbc3 {
             self.rtc_dh &= !Self::DAY_COUNTER_MSB_MASK;
         }
     }
+
+    fn read_save_data(&self) -> Vec<u8> {
+        self.ram.iter().flatten().copied().collect()
+    }
+
+    fn write_save_data(&mut self, data: &[u8]) -> bool {
+        if data.len() != self.ram.iter().flatten().count() {
+            false
+        } else {
+            self.ram
+                .iter_mut()
+                .flatten()
+                .zip(data)
+                .for_each(|(ram_data, input_data)| *ram_data = *input_data);
+            true
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -476,20 +552,11 @@ struct Mbc5 {
 }
 
 impl Mbc5 {
-    const EXPECTED_RAM_SIZES: [usize; 3] = [0x0000, 0x2000, 0x8000];
-
     fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
-        if !Self::EXPECTED_RAM_SIZES.contains(&ram_size) {
-            let expected_string = format!(
-                "[{}]",
-                Self::EXPECTED_RAM_SIZES
-                    .map(|size| format!("0x{:04X}", size))
-                    .join(", ")
-            );
-
+        if ram_size % 0x2000 != 0 {
             return Err(format!(
-                "expected ram size to be one of {}, but got 0x{:04X}",
-                expected_string, ram_size
+                "expected ram size to be divisible by 0x2000, but got 0x{:04X}",
+                ram_size
             )
             .into());
         }
@@ -499,14 +566,15 @@ impl Mbc5 {
             .map(<[u8; 0x4000]>::try_from)
             .collect::<Result<_, _>>()?;
 
-        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_size / 0x2000];
+        let ram_banks = (ram_size / 0x2000).max(1);
+        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_banks];
 
         Ok(Self {
             rom_banks: rom.len(),
             rom,
             rom_bank_low: 1,
             rom_bank_high: 0,
-            ram_banks: ram.len(),
+            ram_banks,
             ram,
             ram_bank: 0,
             ram_enabled: false,
@@ -544,6 +612,23 @@ impl Mbc5 {
                 }
             }
             _ => unreachable!("unknown cartridge write: 0x{:04X}", address),
+        }
+    }
+
+    fn read_save_data(&self) -> Vec<u8> {
+        self.ram.iter().flatten().copied().collect()
+    }
+
+    fn write_save_data(&mut self, data: &[u8]) -> bool {
+        if data.len() != self.ram.iter().flatten().count() {
+            false
+        } else {
+            self.ram
+                .iter_mut()
+                .flatten()
+                .zip(data)
+                .for_each(|(ram_data, input_data)| *ram_data = *input_data);
+            true
         }
     }
 }

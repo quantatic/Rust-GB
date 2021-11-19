@@ -1607,6 +1607,9 @@ impl Cpu {
     }
 
     fn execute_jr(&mut self, offset: i8, condition: BranchConditionType, branch_penalty: u8) -> u8 {
+        // if (offset as u8) == 0xfe && matches!(condition, BranchConditionType::Unconditional) {
+        //     panic!();
+        // }
         if self.should_branch(condition) {
             // Signed numbers are stored as 2's complement. Wrapping add after
             // casting to unsigned has same effect as wrapping add of signed to

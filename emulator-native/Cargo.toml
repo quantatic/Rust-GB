@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-pixels = "0.7.0"
+pixels = "0.8.0"
 rodio = "0.14.0"
 winit = "0.25.0"
 emulator-core = { path = "../emulator-core" }

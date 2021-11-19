@@ -1,15 +1,10 @@
 use crate::CLOCK_FREQUENCY;
 
-use super::{
-    WaveDuty, EIGHTH_WAVE_DUTY_WAVEFORM, FOURTH_WAVE_DUTY_WAVEFORM, HALF_WAVE_DUTY_WAVEFORM,
-    THREE_QUARTERS_WAVE_DUTY_WAVEFORM,
-};
-
 const SEQUENCER_CLOCK_FREQUENCY: u32 = 512;
 
 const SEQUENCER_CLOCK_PERIOD: u32 = CLOCK_FREQUENCY / SEQUENCER_CLOCK_FREQUENCY;
 
-const LENGTH_COUNTER_CLOCKS: [bool; 8] = [false, false, true, false, true, false, true, false];
+const LENGTH_COUNTER_CLOCKS: [bool; 8] = [true, false, true, false, true, false, true, false];
 const VOLUME_ENVELOPE_CLOCKS: [bool; 8] = [false, false, false, false, false, false, false, true];
 
 #[derive(Clone, Debug, Default)]
@@ -26,22 +21,25 @@ pub struct Channel4 {
     noise_ticks_left: u16,
     frame_sequencer_idx: usize,
 
-    clock: u32,
+    clock: u64,
 
     enabled: bool,
 }
 
 impl Channel4 {
     pub fn step(&mut self) {
-        if self.clock % SEQUENCER_CLOCK_PERIOD == 0 {
-            if self.get_envelope_length() != 0 && VOLUME_ENVELOPE_CLOCKS[self.frame_sequencer_idx] {
+        if self.clock % u64::from(SEQUENCER_CLOCK_PERIOD) == 0 {
+            if VOLUME_ENVELOPE_CLOCKS[self.frame_sequencer_idx] {
                 self.envelope_ticks_left = self.envelope_ticks_left.saturating_sub(1);
                 if self.envelope_ticks_left == 0 {
-                    if self.get_envelope_increase() {
-                        self.current_envelope_volume = (self.current_envelope_volume + 1).min(0xF);
-                    } else {
-                        self.current_envelope_volume =
-                            self.current_envelope_volume.saturating_sub(1);
+                    if self.get_envelope_length() != 0 {
+                        if self.get_envelope_increase() {
+                            self.current_envelope_volume =
+                                (self.current_envelope_volume + 1).min(0xF);
+                        } else {
+                            self.current_envelope_volume =
+                                self.current_envelope_volume.saturating_sub(1);
+                        }
                     }
 
                     self.envelope_ticks_left = if self.get_envelope_length() == 0 {
@@ -78,13 +76,20 @@ impl Channel4 {
                 u16::from(self.get_divisor()) << u16::from(self.get_shift_clock_frequency());
         }
 
+        // DAC controlled by upper 5 bits of NRx2: when all are 0 DAC (and thus channel) is disabled.
+        // - bits 7-4: initial envelope volume
+        // - bit 3: envelope increase
+        if self.get_initial_envelope_volume() == 0 && !self.get_envelope_increase() {
+            self.set_enabled(false);
+        }
+
         self.clock += 1;
     }
 
     pub fn sample(&self) -> u8 {
         let audio_high = (self.linear_feedback_shift_register & 0b1) == 0;
 
-        if audio_high && self.get_enabled() && self.get_initial_envelope_volume() != 0 {
+        if audio_high && self.get_enabled() {
             self.current_envelope_volume
         } else {
             0
@@ -129,10 +134,30 @@ impl Channel4 {
     pub fn write_counter_consecutive(&mut self, value: u8) {
         const COUNTER_CONSECUTIVE_ENABLED_MASK: u8 = 1 << 7;
 
-        if (value & COUNTER_CONSECUTIVE_ENABLED_MASK) == COUNTER_CONSECUTIVE_ENABLED_MASK {
+        let length_counter_previously_enabled = self.stop_when_length_expires();
+        self.counter_consecutive = value;
+        let length_counter_now_enabled = self.stop_when_length_expires();
+
+        let trigger =
+            (value & COUNTER_CONSECUTIVE_ENABLED_MASK) == COUNTER_CONSECUTIVE_ENABLED_MASK;
+
+        // If length counter previously disabled, now enabled, next frame sequencer step doesn't tick
+        // the length counter, and length counter != 0, then we decrement length counter. If length
+        // counter becomes 0 via this decrement and we're not triggering, disable the channel.
+        if !length_counter_previously_enabled
+            && length_counter_now_enabled
+            && self.length_counter != 0
+            && !LENGTH_COUNTER_CLOCKS[self.frame_sequencer_idx]
+        {
+            self.length_counter -= 1;
+            if self.length_counter == 0 && !trigger {
+                self.set_enabled(false);
+            }
+        }
+
+        if trigger {
             self.set_enabled(true);
         }
-        self.counter_consecutive = value
     }
 }
 
@@ -199,8 +224,18 @@ impl Channel4 {
     pub fn set_enabled(&mut self, value: bool) {
         if value {
             if self.length_counter == 0 {
-                self.length_counter = 64;
+                // If a channel is triggered when the frame sequencer's next step is one that doesn't
+                // clock the length counter, and the length counter is currently enabled, and the length
+                // counter is currently being reset to 64 from 0, reset to 63 instead (extra decrement).
+                if self.stop_when_length_expires()
+                    && !LENGTH_COUNTER_CLOCKS[self.frame_sequencer_idx]
+                {
+                    self.length_counter = 63;
+                } else {
+                    self.length_counter = 64;
+                }
             }
+
             self.noise_ticks_left =
                 u16::from(self.get_divisor()) << u16::from(self.get_shift_clock_frequency());
             self.envelope_ticks_left = self.get_envelope_length();
@@ -216,13 +251,11 @@ impl Channel4 {
 
     pub fn set_power(&mut self, value: bool) {
         if value {
-            self.frame_sequencer_idx = 0;
+            self.frame_sequencer_idx = 7; // reset so next step will be 0x00
         } else {
             self.sound_length = 0;
             self.volume_envelope = 0;
-            self.current_envelope_volume = 0;
             self.polynomial_counter = 0;
-            self.linear_feedback_shift_register = 0;
             self.counter_consecutive = 0;
 
             self.set_enabled(false);

@@ -32,7 +32,7 @@ pub struct Bus {
     wram_banks: Box<[[u8; 0x1000]; 8]>,
     wram_bank_index: u8,
     high_ram: [u8; 0x7F],
-    boot_rom_enabled: bool,
+    pub boot_rom_enabled: bool,
     dma_source: u16,
     dma_destination: u16,
     prepare_speed_switch: bool,
@@ -94,7 +94,6 @@ impl Bus {
         let old_ppu_mode = self.ppu.get_stat_mode();
 
         self.apu.step();
-        self.cartridge.step();
         self.ppu.step();
         self.timer.step();
 
@@ -163,6 +162,7 @@ impl Bus {
             0xFF12 => self.apu.read_nr12(),
             0xFF13 => self.apu.read_nr13(),
             0xFF14 => self.apu.read_nr14(),
+            0xFF15 => self.apu.read_nr20(),
             0xFF16 => self.apu.read_nr21(),
             0xFF17 => self.apu.read_nr22(),
             0xFF18 => self.apu.read_nr23(),
@@ -172,6 +172,7 @@ impl Bus {
             0xFF1C => self.apu.read_nr32(),
             0xFF1D => self.apu.read_nr33(),
             0xFF1E => self.apu.read_nr34(),
+            0xFF1F => self.apu.read_nr40(),
             0xFF20 => self.apu.read_nr41(),
             0xFF21 => self.apu.read_nr42(),
             0xFF22 => self.apu.read_nr43(),
@@ -179,6 +180,7 @@ impl Bus {
             0xFF24 => self.apu.read_nr50(),
             0xFF25 => self.apu.read_nr51(),
             0xFF26 => self.apu.read_nr52(),
+            0xFF27..=0xFF2F => 0xFF, // $FF27-$FF2F always read back as $FF
             0xFF30..=0xFF3F => self.apu.read_wave_pattern_ram(address - 0xFF30),
             0xFF40 => self.ppu.read_lcd_control(),
             0xFF41 => self.ppu.read_stat(),
@@ -250,6 +252,7 @@ impl Bus {
             0xFF12 => self.apu.write_nr12(value),
             0xFF13 => self.apu.write_nr13(value),
             0xFF14 => self.apu.write_nr14(value),
+            0xFF15 => self.apu.write_nr20(value),
             0xFF16 => self.apu.write_nr21(value),
             0xFF17 => self.apu.write_nr22(value),
             0xFF18 => self.apu.write_nr23(value),
@@ -259,6 +262,7 @@ impl Bus {
             0xFF1C => self.apu.write_nr32(value),
             0xFF1D => self.apu.write_nr33(value),
             0xFF1E => self.apu.write_nr34(value),
+            0xFF1F => self.apu.write_nr40(value),
             0xFF20 => self.apu.write_nr41(value),
             0xFF21 => self.apu.write_nr42(value),
             0xFF22 => self.apu.write_nr43(value),
@@ -266,6 +270,7 @@ impl Bus {
             0xFF24 => self.apu.write_nr50(value),
             0xFF25 => self.apu.write_nr51(value),
             0xFF26 => self.apu.write_nr52(value),
+            0xFF27..=0xFF2F => {} // $FF27-$FF2F always read back as $FF
             0xFF30..=0xFF3F => self.apu.write_wave_pattern_ram(value, address - 0xFF30),
             0xFF40 => self.ppu.write_lcd_control(value),
             0xFF41 => self.ppu.write_stat(value),

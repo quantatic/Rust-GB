@@ -25,7 +25,7 @@ const THREE_QUARTERS_WAVE_DUTY_WAVEFORM: [bool; 8] =
 
 #[derive(Clone, Default)]
 pub struct Apu {
-    channel_1: Channel1,
+    pub channel_1: Channel1,
     channel_2: Channel2,
     channel_3: Channel3,
     channel_4: Channel4,
@@ -93,12 +93,12 @@ impl Apu {
 
             [left_output / 32.0, right_output / 32.0]
         } else {
-            [-1.0; 2]
+            [0.0; 2]
         }
     }
 
     pub fn read_nr10(&self) -> u8 {
-        self.channel_1.read_sweep()
+        self.channel_1.read_sweep() | 0x80
     }
 
     pub fn write_nr10(&mut self, value: u8) {
@@ -108,7 +108,7 @@ impl Apu {
     }
 
     pub fn read_nr11(&self) -> u8 {
-        self.channel_1.read_sound_length_wave_duty()
+        self.channel_1.read_sound_length_wave_duty() | 0x3F
     }
 
     pub fn write_nr11(&mut self, value: u8) {
@@ -118,7 +118,7 @@ impl Apu {
     }
 
     pub fn read_nr12(&self) -> u8 {
-        self.channel_1.read_volume_envelope()
+        self.channel_1.read_volume_envelope() | 0x00
     }
 
     pub fn write_nr12(&mut self, value: u8) {
@@ -128,7 +128,7 @@ impl Apu {
     }
 
     pub fn read_nr13(&self) -> u8 {
-        self.channel_1.read_frequency_low()
+        self.channel_1.read_frequency_low() | 0xFF
     }
 
     pub fn write_nr13(&mut self, value: u8) {
@@ -138,7 +138,7 @@ impl Apu {
     }
 
     pub fn read_nr14(&self) -> u8 {
-        self.channel_1.read_frequency_high()
+        self.channel_1.read_frequency_high() | 0xBF
     }
 
     pub fn write_nr14(&mut self, value: u8) {
@@ -147,8 +147,14 @@ impl Apu {
         }
     }
 
+    pub fn read_nr20(&self) -> u8 {
+        0xFF
+    }
+
+    pub fn write_nr20(&mut self, _: u8) {}
+
     pub fn read_nr21(&self) -> u8 {
-        self.channel_2.read_sound_length_wave_duty()
+        self.channel_2.read_sound_length_wave_duty() | 0x3F
     }
 
     pub fn write_nr21(&mut self, value: u8) {
@@ -158,7 +164,7 @@ impl Apu {
     }
 
     pub fn read_nr22(&self) -> u8 {
-        self.channel_2.read_volume_envelope()
+        self.channel_2.read_volume_envelope() | 0x00
     }
 
     pub fn write_nr22(&mut self, value: u8) {
@@ -168,7 +174,7 @@ impl Apu {
     }
 
     pub fn read_nr23(&self) -> u8 {
-        self.channel_2.read_frequency_low()
+        self.channel_2.read_frequency_low() | 0xFF
     }
 
     pub fn write_nr23(&mut self, value: u8) {
@@ -178,7 +184,7 @@ impl Apu {
     }
 
     pub fn read_nr24(&self) -> u8 {
-        self.channel_2.read_frequency_high()
+        self.channel_2.read_frequency_high() | 0xBF
     }
 
     pub fn write_nr24(&mut self, value: u8) {
@@ -188,7 +194,7 @@ impl Apu {
     }
 
     pub fn read_nr30(&self) -> u8 {
-        self.channel_3.read_sound_on_off()
+        self.channel_3.read_sound_on_off() | 0x7F
     }
 
     pub fn write_nr30(&mut self, value: u8) {
@@ -198,7 +204,7 @@ impl Apu {
     }
 
     pub fn read_nr31(&self) -> u8 {
-        self.channel_3.read_sound_length()
+        self.channel_3.read_sound_length() | 0xFF
     }
 
     pub fn write_nr31(&mut self, value: u8) {
@@ -208,7 +214,7 @@ impl Apu {
     }
 
     pub fn read_nr32(&self) -> u8 {
-        self.channel_3.read_output_level()
+        self.channel_3.read_output_level() | 0x9F
     }
 
     pub fn write_nr32(&mut self, value: u8) {
@@ -218,7 +224,7 @@ impl Apu {
     }
 
     pub fn read_nr33(&self) -> u8 {
-        self.channel_3.read_frequency_low()
+        self.channel_3.read_frequency_low() | 0xFF
     }
 
     pub fn write_nr33(&mut self, value: u8) {
@@ -228,7 +234,7 @@ impl Apu {
     }
 
     pub fn read_nr34(&self) -> u8 {
-        self.channel_3.read_frequency_high()
+        self.channel_3.read_frequency_high() | 0xBF
     }
 
     pub fn write_nr34(&mut self, value: u8) {
@@ -241,12 +247,19 @@ impl Apu {
         self.channel_3.read_wave_pattern_ram(offset)
     }
 
+    // Wave pattern ram can be written even APU is powered off.
     pub fn write_wave_pattern_ram(&mut self, value: u8, offset: u16) {
         self.channel_3.write_wave_pattern_ram(value, offset);
     }
 
+    pub fn read_nr40(&self) -> u8 {
+        0xFF
+    }
+
+    pub fn write_nr40(&mut self, _: u8) {}
+
     pub fn read_nr41(&self) -> u8 {
-        self.channel_4.read_sound_length_register()
+        self.channel_4.read_sound_length_register() | 0xFF
     }
 
     pub fn write_nr41(&mut self, value: u8) {
@@ -256,7 +269,7 @@ impl Apu {
     }
 
     pub fn read_nr42(&self) -> u8 {
-        self.channel_4.read_volume_envelope()
+        self.channel_4.read_volume_envelope() | 0x00
     }
 
     pub fn write_nr42(&mut self, value: u8) {
@@ -266,7 +279,7 @@ impl Apu {
     }
 
     pub fn read_nr43(&self) -> u8 {
-        self.channel_4.read_polynomial_counter()
+        self.channel_4.read_polynomial_counter() | 0x00
     }
 
     pub fn write_nr43(&mut self, value: u8) {
@@ -276,7 +289,7 @@ impl Apu {
     }
 
     pub fn read_nr44(&self) -> u8 {
-        self.channel_4.read_counter_consecutive()
+        self.channel_4.read_counter_consecutive() | 0xBF
     }
 
     pub fn write_nr44(&mut self, value: u8) {
@@ -286,7 +299,7 @@ impl Apu {
     }
 
     pub fn read_nr50(&self) -> u8 {
-        self.channel_control
+        self.channel_control | 0x00
     }
 
     pub fn write_nr50(&mut self, value: u8) {
@@ -296,7 +309,7 @@ impl Apu {
     }
 
     pub fn read_nr51(&self) -> u8 {
-        self.output_terminal_selection
+        self.output_terminal_selection | 0x00
     }
 
     pub fn write_nr51(&mut self, value: u8) {
@@ -333,11 +346,14 @@ impl Apu {
             result |= Self::SOUND_4_ON_OFF_FLAG;
         }
 
-        result
+        result | 0x70
     }
 
     pub fn write_nr52(&mut self, value: u8) {
         let powered = (value & Self::ALL_SOUND_ON_OFF_FLAG) == Self::ALL_SOUND_ON_OFF_FLAG;
+
+        self.channel_control = 0;
+        self.output_terminal_selection = 0;
         self.powered = powered;
 
         self.channel_1.set_power(powered);
