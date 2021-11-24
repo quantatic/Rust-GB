@@ -2,12 +2,13 @@
 members = [
 	"emulator-core",
 	"emulator-native",
+	"emulator-web",
 ]
 resolver = "2"
 
 [profile.release]
 opt-level = 3
 debug = 2
-overflow-checks = true
+# overflow-checks = true
 # lto = true
 # codegen-units = 1

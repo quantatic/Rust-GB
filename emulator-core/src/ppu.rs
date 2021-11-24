@@ -3,6 +3,9 @@ use std::convert::TryFrom;
 use std::default::Default;
 use std::fmt::Debug;
 
+pub const PPU_WIDTH: usize = 160;
+pub const PPU_HEIGHT: usize = 144;
+
 #[derive(Clone, Copy, Debug)]
 pub enum PpuRenderStatus {
     HBlank,

@@ -68,10 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let event_loop = EventLoop::new();
     let window = {
-        let size = LogicalSize::new(
-            PPU_WIDTH * scale_factor,
-            PPU_HEIGHT * scale_factor,
-        );
+        let size = LogicalSize::new(PPU_WIDTH * scale_factor, PPU_HEIGHT * scale_factor);
         WindowBuilder::new()
             .with_title("Aidan's Gameboy Emulator")
             .with_inner_size(size)

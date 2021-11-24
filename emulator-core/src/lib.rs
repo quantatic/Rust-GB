@@ -11,8 +11,6 @@ use cpu::Cpu;
 
 use std::hash::Hasher;
 
-pub const PPU_WIDTH: u16 = 160;
-pub const PPU_HEIGHT: u16 = 144;
 pub const CLOCK_FREQUENCY: u32 = 4_194_304;
 
 pub fn calculate_ppu_buffer_checksum(cpu: &Cpu) -> u32 {
