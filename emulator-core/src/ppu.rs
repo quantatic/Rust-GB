@@ -681,6 +681,12 @@ impl Ppu {
         if old_window_displayed && !new_window_displayed {
             self.window_lcd_y += 1;
         }
+
+		if !self.get_lcd_ppu_enable() {
+			self.stat = 0;
+			self.dot = 0;
+			self.lcd_y = 0;
+		}
     }
 
     pub fn get_lcd_ppu_enable(&self) -> bool {
