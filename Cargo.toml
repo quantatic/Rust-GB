@@ -2,7 +2,7 @@
 members = [
 	"emulator-core",
 	"emulator-native",
-	"emulator-web",
+#	"emulator-web",
 ]
 resolver = "2"
 

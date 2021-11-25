@@ -18,7 +18,7 @@ use winit::{
 
 use std::rc::Rc;
 
-const ROM: &[u8] = include_bytes!("../../oracle_of_seasons.gbc");
+const ROM: &[u8] = include_bytes!("../../emulator-core/tests/pocket.gb");
 
 const AUDIO_SAMPLE_FREQUENCY: u32 = 44_100;
 
@@ -47,9 +47,9 @@ async fn run() {
             .build(&event_loop)
             .unwrap()
     };
-    let window = Rc::new(window);
 
     let canvas = window.canvas();
+    let window = Rc::new(window);
 
     let html_window = web_sys::window().unwrap();
     let document = html_window.document().unwrap();

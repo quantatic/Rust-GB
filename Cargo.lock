@@ -266,16 +266,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console_error_panic_hook"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
-dependencies = [
- "cfg-if 1.0.0",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "copyless"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -409,9 +399,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81156fece84ab6a9f2afdb109ce3ae577e42b1228441eded99bd77f627953b1a"
+checksum = "3825b1e8580894917dc4468cb634a1b4e9745fddc854edad72d9c04644c0319f"
 dependencies = [
  "cfg-if 1.0.0",
 ]
@@ -605,21 +595,6 @@ dependencies = [
  "emulator-core",
  "pixels",
  "rodio",
- "winit",
-]
-
-[[package]]
-name = "emulator-web"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "emulator-core",
- "js-sys",
- "pixels",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
  "winit",
 ]
 
@@ -1978,9 +1953,7 @@ dependencies = [
  "raw-window-handle",
  "scopeguard",
  "smithay-client-toolkit",
- "wasm-bindgen",
  "wayland-client",
- "web-sys",
  "winapi",
  "x11-dl",
 ]

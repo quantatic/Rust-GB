@@ -14,4 +14,4 @@ wasm-bindgen = "0.2.78"
 wasm-bindgen-futures = "0.4.28"
 web-sys = { version = "0.3.55", features = ["AudioBuffer", "AudioBufferOptions", "AudioBufferSourceNode", "AudioContext", "AudioDestinationNode", "BaseAudioContext", "console", "Document", "Element", "EventTarget", "HtmlCanvasElement", "Window"] }
 winit = { version = "0.25.0", features = ["web-sys"] }
-wgpu = { version = "0.11", features = ["webgl"] }
+wgpu = { version = "0.11.0", features = ["webgl"] }
