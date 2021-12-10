@@ -35,8 +35,9 @@ mod tests {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
-        for _ in 0..150_000_000 {
-            cpu.step();
+        let mut steps = 0;
+        while steps < 150_000_000 {
+            steps += u64::from(cpu.fetch_decode_execute());
         }
 
         let serial_out = cpu.bus.serial.get_data_written();
@@ -48,8 +49,9 @@ mod tests {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
-        for _ in 0..100_000_000 {
-            cpu.step();
+        let mut steps = 0;
+        while steps < 100_000_000 {
+            steps += u64::from(cpu.fetch_decode_execute());
         }
 
         assert_eq!(calculate_ppu_buffer_checksum(&cpu), checksum);
@@ -59,8 +61,9 @@ mod tests {
         let cartridge = Cartridge::new(rom).unwrap();
         let mut cpu = Cpu::new(cartridge);
 
-        for _ in 0..50_000_000 {
-            cpu.step();
+        let mut steps = 0;
+        while steps < 50_000_000 {
+            steps += u64::from(cpu.fetch_decode_execute());
         }
 
         assert_eq!(cpu.read_register(cpu::RegisterByte::B), 03);
@@ -176,6 +179,21 @@ mod tests {
             include_bytes!("../tests/dmg_sound_05_sweep_details.gb"),
             0x84F07FDD,
         );
+    }
+
+    #[test]
+    fn test_01_read_timing() {
+        test_rom_ppu_checksum_passed(include_bytes!("../tests/01_read_timing.gb"), 0x7C271A01);
+    }
+
+    #[test]
+    fn test_02_write_timing() {
+        test_rom_ppu_checksum_passed(include_bytes!("../tests/02_write_timing.gb"), 0xEA402856);
+    }
+
+    #[test]
+    fn test_03_modify_timing() {
+        test_rom_ppu_checksum_passed(include_bytes!("../tests/03_modify_timing.gb"), 0xFB0FD95C);
     }
 
     #[test]

@@ -2,8 +2,8 @@
 members = [
 	"emulator-core",
 	"emulator-native",
-#	"emulator-web",
 ]
+exclude = [ "emulator-web" ]
 resolver = "2"
 
 [profile.release]

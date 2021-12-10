@@ -99,7 +99,7 @@ async fn run() {
         } if window_id == window.id() => *control_flow = ControlFlow::Exit,
         Event::MainEventsCleared => {
             for _ in 0..70_224 {
-                cpu.step();
+                cpu.fetch_decode_execute();
                 if i % 95 == 0 {
                     let [sample_left, sample_right] = cpu.bus.apu.sample();
                     audio_buffer_left.push(sample_left);

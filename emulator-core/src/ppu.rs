@@ -42,7 +42,7 @@ pub struct PaletteColorRgb555 {
     pub blue: u8,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct SpriteAttributeInfo {
     pub y_position: u8,
     pub x_position: u8,
@@ -99,7 +99,7 @@ impl SpriteAttributeInfo {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct TileMapAttributeInfo {
     pub tile_idx: u8,
     flags: u8,
@@ -134,9 +134,13 @@ impl TileMapAttributeInfo {
 
         self.flags & BACKGROUND_PALETTE_NUMBER_MASK
     }
+
+    fn clear_flags(&mut self) {
+        self.flags = 0;
+    }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Ppu {
     tile_data: Box<[[u8; 0x1800]; 2]>,
     bg_map_0: Box<[TileMapAttributeInfo; 0x400]>,
@@ -145,8 +149,8 @@ pub struct Ppu {
     object_attributes: Box<[SpriteAttributeInfo; 40]>,
     vblank_interrupt_waiting: bool,
     stat_interrupt_waiting: bool,
-    dot: u16,
-    lcd_y: u8,
+    pub dot: u16,
+    pub lcd_y: u8,
     window_lcd_y: u8,
     window_y_condition_triggered: bool,
     window_x_condition_triggered: bool,
@@ -682,11 +686,11 @@ impl Ppu {
             self.window_lcd_y += 1;
         }
 
-		if !self.get_lcd_ppu_enable() {
-			self.stat = 0;
-			self.dot = 0;
-			self.lcd_y = 0;
-		}
+        if !self.get_lcd_ppu_enable() {
+            self.dot = 0;
+            self.lcd_y = 0;
+            self.set_stat_mode(PpuRenderStatus::OAMSearch);
+        }
     }
 
     pub fn get_lcd_ppu_enable(&self) -> bool {
@@ -697,11 +701,18 @@ impl Ppu {
     fn get_window_tile_attributes(&self, index: u16) -> TileMapAttributeInfo {
         const WINDOW_TILE_MAP_AREA_MASK: u8 = 1 << 6;
 
-        if (self.lcd_control & WINDOW_TILE_MAP_AREA_MASK) != WINDOW_TILE_MAP_AREA_MASK {
-            self.bg_map_0[usize::from(index)]
-        } else {
-            self.bg_map_1[usize::from(index)]
+        let mut result =
+            if (self.lcd_control & WINDOW_TILE_MAP_AREA_MASK) != WINDOW_TILE_MAP_AREA_MASK {
+                self.bg_map_0[usize::from(index)]
+            } else {
+                self.bg_map_1[usize::from(index)]
+            };
+
+        if self.dmg_mode {
+            result.clear_flags();
         }
+
+        result
     }
 
     fn get_window_enable(&self) -> bool {
@@ -733,11 +744,17 @@ impl Ppu {
     fn get_bg_tile_attributes(&self, index: u16) -> TileMapAttributeInfo {
         const BG_TILE_MAP_AREA_MASK: u8 = 1 << 3;
 
-        if (self.lcd_control & BG_TILE_MAP_AREA_MASK) == 0 {
+        let mut result = if (self.lcd_control & BG_TILE_MAP_AREA_MASK) == 0 {
             self.bg_map_0[usize::from(index)]
         } else {
             self.bg_map_1[usize::from(index)]
+        };
+
+        if self.dmg_mode {
+            result.clear_flags();
         }
+
+        result
     }
 
     fn get_obj_tile_data(&self, attribute_info: SpriteAttributeInfo, sprite_y_offset: u8) -> &[u8] {
@@ -748,7 +765,6 @@ impl Ppu {
         };
 
         if self.dmg_mode {
-            assert_eq!(attribute_info.get_tile_vram_bank(), 0);
             &self.tile_data[0][usize::from(real_tile_idx) * 16..][..16]
         } else {
             &self.tile_data[usize::from(attribute_info.get_tile_vram_bank())]
@@ -828,7 +844,7 @@ impl Ppu {
             self.bg_color_palette_data[0][usize::from(color_palette_idx)]
         } else {
             self.bg_color_palette_data[usize::from(attribute_info.get_palette_number())]
-                [usize::from(palette_index)]
+                [palette_index]
         }
     }
 
@@ -1102,7 +1118,7 @@ impl Ppu {
     }
 
     pub fn read_vram_bank(&self) -> u8 {
-        self.vram_bank_index
+        self.vram_bank_index | (!0x1)
     }
 
     pub fn write_vram_bank(&mut self, value: u8) {

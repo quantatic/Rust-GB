@@ -96,6 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut last_fps_calculation = Instant::now();
     let mut frames_since_fps_calculation = 0;
+
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::MainEventsCleared => {
@@ -123,7 +124,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         1_000_000_000 * emulation_steps / u64::from(CLOCK_FREQUENCY),
                     )
                 {
-                    cpu.step();
+                    let steps_executed = cpu.fetch_decode_execute();
 
                     // While number of cycles for which we have played audio is less than the
                     // number of cpu cycles actually run, take another sound sample.
@@ -138,7 +139,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         audio_steps += 1;
                     }
 
-                    emulation_steps += 1;
+                    emulation_steps += u64::from(steps_executed);
                 }
 
                 frames_since_fps_calculation += 1;
@@ -203,15 +204,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write(true)
                     .truncate(true)
                     .open(&save_filename)
-                    .expect(format!("failed to open save file: {}", save_filename).as_str());
+                    .unwrap_or_else(|_| panic!("failed to open save file: {}", save_filename));
                 let save_data = cpu.bus.cartridge.read_save_data();
 
-                save_file.write_all(&save_data).expect(
-                    format!("failed to write save data to save file: {}", save_filename).as_str(),
-                );
-                save_file.flush().expect(
-                    format!("failed to flush save data to save file: {}", save_filename).as_str(),
-                );
+                save_file.write_all(&save_data).unwrap_or_else(|_| {
+                    panic!("failed to write save data to save file: {}", save_filename)
+                });
+                save_file.flush().unwrap_or_else(|_| {
+                    panic!("failed to flush save data to save file: {}", save_filename)
+                });
 
                 println!("wrote save file to {}", save_filename);
             }

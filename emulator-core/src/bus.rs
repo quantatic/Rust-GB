@@ -26,9 +26,9 @@ pub enum SpeedMode {
 
 #[derive(Clone)]
 pub struct Bus {
-    interrupt_enable: u8,
-    interrupt_flag: u8,
-    interrupt_master_enable: bool,
+    pub interrupt_enable: u8,
+    pub interrupt_flag: u8,
+    pub interrupt_master_enable: bool,
     wram_banks: Box<[[u8; 0x1000]; 8]>,
     wram_bank_index: u8,
     high_ram: [u8; 0x7F],
@@ -74,53 +74,42 @@ impl Bus {
 }
 
 impl Bus {
-    pub fn step(&mut self) {
-        if self.timer.poll_interrupt() {
-            self.interrupt_flag |= Self::TIMER_INTERRUPT_MASK;
-        }
+    pub fn step_m_cycle(&mut self) {
+        for i in 0..4 {
+            let double_speed_tick = matches!(self.current_speed, SpeedMode::Double) && i % 2 == 1;
 
-        if self.ppu.poll_vblank_interrupt() {
-            self.interrupt_flag |= Self::VBLANK_INTERRUPT_MASK;
-        }
+            let old_ppu_mode = self.ppu.get_stat_mode();
 
-        if self.ppu.poll_stat_interrupt() {
-            self.interrupt_flag |= Self::LCD_STAT_INTERRUPT_MASK;
-        }
-
-        if self.joypad.poll_interrupt() {
-            self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
-        }
-
-        let old_ppu_mode = self.ppu.get_stat_mode();
-
-        self.apu.step();
-        self.ppu.step();
-        self.timer.step();
-
-        let new_ppu_mode = self.ppu.get_stat_mode();
-
-        if !matches!(old_ppu_mode, PpuRenderStatus::HBlank)
-            && matches!(new_ppu_mode, PpuRenderStatus::HBlank)
-            && self.hblank_dma_blocks_left > 0
-            && self.hblank_dma_ongoing
-        {
-            for _ in 0..Self::DMA_BLOCK_SIZE {
-                let data = self.read_byte_address(self.dma_source);
-                self.dma_source += 1;
-
-                self.write_byte_address(data, self.dma_destination);
-                self.dma_destination += 1;
+            if !double_speed_tick {
+                self.apu.step();
+                self.ppu.step();
             }
-            self.hblank_dma_blocks_left -= 1;
 
-            if self.hblank_dma_blocks_left == 0 {
-                self.hblank_dma_ongoing = false;
-            }
-        }
-
-        if matches!(self.current_speed, SpeedMode::Double) {
             self.cartridge.step();
             self.timer.step();
+
+            let new_ppu_mode = self.ppu.get_stat_mode();
+
+            if !matches!(old_ppu_mode, PpuRenderStatus::HBlank)
+                && matches!(new_ppu_mode, PpuRenderStatus::HBlank)
+                && self.hblank_dma_blocks_left > 0
+                && self.hblank_dma_ongoing
+            {
+                for _ in 0..Self::DMA_BLOCK_SIZE {
+                    let data = self.read_byte_address(self.dma_source);
+                    self.dma_source += 1;
+
+                    self.write_byte_address(data, self.dma_destination);
+                    self.dma_destination += 1;
+                }
+                self.hblank_dma_blocks_left -= 1;
+
+                if self.hblank_dma_blocks_left == 0 {
+                    self.hblank_dma_ongoing = false;
+                }
+            }
+
+            self.update_interrupt_flag();
         }
     }
 
@@ -214,12 +203,6 @@ impl Bus {
         }
     }
 
-    pub fn read_word_address(&self, address: u16) -> u16 {
-        let first_byte = self.read_byte_address(address);
-        let second_byte = self.read_byte_address(address + 1);
-        u16::from_le_bytes([first_byte, second_byte])
-    }
-
     pub fn write_byte_address(&mut self, value: u8, address: u16) {
         match address {
             0x0000..=0x7FFF => {
@@ -291,6 +274,7 @@ impl Bus {
             0xFF4A => self.ppu.write_window_y(value),
             0xFF4B => self.ppu.write_window_x(value),
             0xFF4C => {
+                println!("write of 0x{:02X} to 0xFF4C", value);
                 const CGB_MODE_FLAG_MASK: u8 = 1 << 7;
                 const DMG_MODE_FLAG_MASK: u8 = 1 << 2;
                 const PGB_MODE_FLAG_MASK: u8 = CGB_MODE_FLAG_MASK | DMG_MODE_FLAG_MASK;
@@ -307,6 +291,7 @@ impl Bus {
             0xFF4D => self.write_key_1(value),
             0xFF4F => self.ppu.write_vram_bank(value),
             0xFF50 => {
+                println!("boot rom disabled");
                 self.boot_rom_enabled = value == 0 // disable boot rom on non-zero write
             }
             0xFF51 => self.write_dma_source_high(value),
@@ -330,12 +315,6 @@ impl Bus {
             0xFFFF => self.interrupt_enable = value & 0b0001_1111,
             _ => eprintln!("write of 0x{:02X} to 0x{:02X}", value, address),
         }
-    }
-
-    pub fn write_word_address(&mut self, value: u16, address: u16) {
-        let bytes = value.to_le_bytes();
-        self.write_byte_address(bytes[0], address);
-        self.write_byte_address(bytes[1], address + 1);
     }
 
     fn read_dma_source_high(&self) -> u8 {
@@ -457,6 +436,8 @@ impl Bus {
     //
     // The returned interrupt is expected to be handled immedietly.
     pub fn poll_interrupt(&mut self) -> Option<InterruptType> {
+        self.update_interrupt_flag();
+
         if !self.interrupt_master_enable {
             return None;
         }
@@ -466,7 +447,7 @@ impl Bus {
             if ((self.interrupt_enable & mask) != 0) && ((self.interrupt_flag & mask) != 0) {
                 self.interrupt_flag &= !mask;
                 self.interrupt_master_enable = false;
-                return match bit_idx {
+                let result = match bit_idx {
                     0 => Some(InterruptType::VBlank),
                     1 => Some(InterruptType::LcdStat),
                     2 => Some(InterruptType::Timer),
@@ -474,10 +455,29 @@ impl Bus {
                     4 => Some(InterruptType::Joypad),
                     _ => unreachable!(),
                 };
+                return result;
             }
         }
 
         None
+    }
+
+    fn update_interrupt_flag(&mut self) {
+        if self.timer.poll_interrupt() {
+            self.interrupt_flag |= Self::TIMER_INTERRUPT_MASK;
+        }
+
+        if self.ppu.poll_vblank_interrupt() {
+            self.interrupt_flag |= Self::VBLANK_INTERRUPT_MASK;
+        }
+
+        if self.ppu.poll_stat_interrupt() {
+            self.interrupt_flag |= Self::LCD_STAT_INTERRUPT_MASK;
+        }
+
+        if self.joypad.poll_interrupt() {
+            self.interrupt_flag |= Self::JOYPAD_INTERRUPT_MASK;
+        }
     }
 
     // Checks to see if an ongoing HALT instruction should finish. This is the
@@ -505,6 +505,7 @@ impl Bus {
                 SpeedMode::Normal => SpeedMode::Double,
                 SpeedMode::Double => SpeedMode::Normal,
             };
+            println!("switched speed to {:?}", self.current_speed);
             self.prepare_speed_switch = false;
 
             true

@@ -6,27 +6,14 @@ enum InputClockSelect {
     Bit9,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Timer {
-    timer_counter: u8,
+    pub timer_counter: u8,
     timer_counter_reload_delay: u8,
     timer_modulo: u8,
     timer_control: u8,
-    tick_counter: u16,
+    pub tick_counter: u16,
     interrupt_waiting: bool,
-}
-
-impl Default for Timer {
-    fn default() -> Self {
-        Self {
-            timer_counter: Default::default(),
-            timer_counter_reload_delay: Default::default(),
-            timer_modulo: Default::default(),
-            timer_control: Default::default(),
-            tick_counter: Default::default(),
-            interrupt_waiting: false,
-        }
-    }
 }
 
 impl Timer {
@@ -107,10 +94,11 @@ impl Timer {
         if old_timer_increment_bit && !new_timer_increment_bit {
             let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
             if overflow {
-                self.timer_counter_reload_delay = Self::TIMER_COUNTER_RELOAD_DELAY;
+                self.timer_counter = self.timer_modulo;
+                self.interrupt_waiting = true;
+            } else {
+                self.timer_counter = new_timer_counter;
             }
-
-            self.timer_counter = new_timer_counter;
         }
     }
 
@@ -188,12 +176,15 @@ impl Timer {
         let new_timer_increment_bit = (self.tick_counter & new_input_clock_select_mask) != 0;
 
         if old_timer_increment_bit && !new_timer_increment_bit {
+            println!("increment from timer control change");
             let (new_timer_counter, overflow) = self.timer_counter.overflowing_add(1);
             if overflow {
-                self.timer_counter_reload_delay = Self::TIMER_COUNTER_RELOAD_DELAY;
+                self.timer_counter = self.timer_modulo;
+                self.interrupt_waiting = true;
+                println!("timer interrupt waiting");
+            } else {
+                self.timer_counter = new_timer_counter;
             }
-
-            self.timer_counter = new_timer_counter;
         }
     }
 
