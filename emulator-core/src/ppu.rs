@@ -161,8 +161,8 @@ pub struct Ppu {
     scroll_y: u8,
     window_x: u8,
     window_y: u8,
-    back_buffer: Box<[[PaletteColorRgb555; 160]; 144]>, // access as buffer[y][x]
-    front_buffer: Box<[[PaletteColorRgb555; 160]; 144]>, // access as buffer[y][x]
+    back_buffer: Box<[[PaletteColorRgb555; PPU_WIDTH]; PPU_HEIGHT]>, // access as buffer[y][x]
+    front_buffer: Box<[[PaletteColorRgb555; PPU_WIDTH]; PPU_HEIGHT]>, // access as buffer[y][x]
     bg_palette: u8,
     obj_palette_0: u8,
     obj_palette_1: u8,
@@ -527,7 +527,7 @@ impl Ppu {
         None
     }
 
-    pub fn get_buffer(&self) -> &[[PaletteColorRgb555; 160]; 144] {
+    pub fn get_buffer(&self) -> &[[PaletteColorRgb555; PPU_WIDTH]; PPU_HEIGHT] {
         &self.front_buffer
     }
 

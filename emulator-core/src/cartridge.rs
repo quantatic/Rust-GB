@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
-use std::{error::Error, time::Instant};
+use std::{error::Error};
+use instant::Instant;
 
 #[derive(Clone)]
 pub struct Cartridge {
@@ -347,16 +348,16 @@ enum RtcLatchState {
 }
 
 impl Mbc3 {
-    fn new(data: &[u8]) -> Result<Self, Box<dyn Error>> {
+    fn new(data: &[u8], ram_size: usize) -> Result<Self, Box<dyn Error>> {
         let rom = data
             .chunks(0x4000)
             .map(<[u8; 0x4000]>::try_from)
             .collect::<Result<_, _>>()?;
 
-        let ram = data
-            .chunks(0x2000)
-            .map(<[u8; 0x2000]>::try_from)
-            .collect::<Result<_, _>>()?;
+        let ram_banks = (ram_size / 0x2000).max(1);
+        let ram: Vec<[u8; 0x2000]> = vec![[0; 0x2000]; ram_banks];
+
+        println!("{}", ram.len());
 
         Ok(Self {
             rom,
@@ -686,7 +687,7 @@ impl Cartridge {
             0x00 => CartridgeType::NoMbc(NoMbc::new(data, ram_size)?),
             0x01 | 0x02 | 0x03 => CartridgeType::Mbc1(Mbc1::new(data, ram_size)?),
             0x05 | 0x06 => CartridgeType::Mbc2(Mbc2::new(data)?),
-            0x0F | 0x10 | 0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data)?),
+            0x0F | 0x10 | 0x11 | 0x12 | 0x13 => CartridgeType::Mbc3(Mbc3::new(data, ram_size)?),
             0x19 | 0x1A | 0x1B | 0x1C | 0x1D | 0x1E => {
                 CartridgeType::Mbc5(Mbc5::new(data, ram_size)?)
             }

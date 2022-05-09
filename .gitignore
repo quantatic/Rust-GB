@@ -2,3 +2,5 @@
 *.save
 /*.gbc
 /*.gb
+
+.DS_store

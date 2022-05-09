@@ -1,17 +1,15 @@
-## Dependencies
+## Install Dependencies
 
 ```bash
-$ cargo install trunk
+$ npm install
 ```
 
-## Build
+## Start
 
 ```
-$ trunk build --release
-```
-
-## Serve
-
-```
-$ trunk serve --release
+$ npm start
+...
+<i> [webpack-dev-server] Project is running at:
+<i> [webpack-dev-server] Loopback: http://localhost:8080/
+...
 ```
