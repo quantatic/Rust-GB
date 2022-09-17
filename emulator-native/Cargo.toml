@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 emulator-core = { path = "../emulator-core" }
-pixels = "0.8.0"
-rodio = "0.14.0"
-winit = "0.26.0"
+pixels = "0.9.0"
+rodio = "0.16.0"
+winit = "0.27.3"

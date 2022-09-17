@@ -13,15 +13,15 @@ crate-type = ["cdylib"]
 
 [dependencies]
 emulator-core = { path = "../emulator-core", features = ["wasm-bindgen"]}
-wasm-bindgen = "0.2.80"
+wasm-bindgen = "0.2.83"
 wee_alloc = "0.4.5"
 
 # These crates are used for running unit tests.
 [dev-dependencies]
-wasm-bindgen-test = "0.3.30"
-futures = "0.3.21"
-js-sys = "0.3.57"
-wasm-bindgen-futures = "0.4.30"
+wasm-bindgen-test = "0.3.33"
+futures = "0.3.24"
+js-sys = "0.3.60"
+wasm-bindgen-futures = "0.4.33"
 
 [profile.release]
 panic = "abort"
