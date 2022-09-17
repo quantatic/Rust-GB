@@ -7,10 +7,6 @@ use emulator_core::{
 
 use wasm_bindgen::prelude::*;
 
-// Use `wee_alloc` as the global allocator.
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 #[derive(Debug)]
 #[wasm_bindgen]
 pub struct Emulator {
