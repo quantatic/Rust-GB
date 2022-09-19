@@ -20,9 +20,15 @@ jobs:
   build:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      # Install build dependencies required to build the emulator.
+      - name: Install build dependencies
+        run: |
+          sudo apt update -y && \
+          sudo apt install -y \
+            libasound2-dev
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
 
