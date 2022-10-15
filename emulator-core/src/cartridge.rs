@@ -1,6 +1,6 @@
-use std::convert::TryFrom;
-use std::{error::Error};
 use instant::Instant;
+use std::convert::TryFrom;
+use std::error::Error;
 
 #[derive(Clone)]
 pub struct Cartridge {
