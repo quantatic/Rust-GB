@@ -102,8 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Event::MainEventsCleared => {
                 if cpu.bus.ppu.get_lcd_ppu_enable() {
                     let ppu_buffer = cpu.bus.ppu.get_buffer();
-                    for (pixel_idx, pixel) in pixels.get_frame_mut().chunks_exact_mut(4).enumerate()
-                    {
+                    for (pixel_idx, pixel) in pixels.frame_mut().chunks_exact_mut(4).enumerate() {
                         let ppu_pixel_x = pixel_idx % usize::from(PPU_WIDTH);
                         let ppu_pixel_y = pixel_idx / usize::from(PPU_WIDTH);
 
