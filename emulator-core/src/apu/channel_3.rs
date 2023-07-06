@@ -62,10 +62,10 @@ impl Channel3 {
     }
 
     pub fn sample(&self) -> u8 {
-        let wave_table_entry = match self.wave_index {
-            idx @ 0..=15 => self.wave_table[idx] >> 4,
-            idx @ 16..=31 => self.wave_table[idx - 16] & 0b1111,
-            _ => unreachable!(),
+        let wave_table_entry = if self.wave_index % 2 == 0 {
+            self.wave_table[self.wave_index / 2] >> 4
+        } else {
+            self.wave_table[self.wave_index / 2] & 0b1111
         };
 
         let sample = match self.get_output_level() {
